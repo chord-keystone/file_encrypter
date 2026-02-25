@@ -1,0 +1,36 @@
+{
+    "file_extension": {
+        "value": ".ncenc",
+        "type": "str"
+    },
+    "key_type": {
+        "value": "RSA4096",
+        "type": "str"
+    },
+    "dual_device": {
+        "value": true,
+        "type": "bool"
+    },
+    "filename_obscuration": {
+        "value": true,
+        "type": "bool"
+    },
+    "symmetric_type": {
+        "value": "AEAD.ChaCha20Poly1305",
+        "type": "str"
+    },
+    "symmetric_kdf": {
+        "value": "SHA256",
+        "type": "str"
+    },
+    "checksum_value": {
+        "value": "header_plaintext",
+        "type": "str"
+    },
+    "signature_device": "1506f64f282c98f5ad3a133dc6ff964863112944",
+    "signature_password": "4182e34fa080cc581608de866000af21b9558da8",
+    "management_auth": "d5e47456a353e94aa8fa0867b141d07f5fc727422f51b6fc73272be435f64a0f",
+    "public_key": "00",
+    "skey_base": "00",
+    "man_salt": "c744377dbfa7d776ebcaf47f4011dce7"
+}

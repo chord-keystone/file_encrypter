@@ -1,0 +1,19 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            // "args": ["-mtarget", "-t", "'C:\\Users\\cason\\Documents\\important_secure_testing\\ID Photos\\CT_DrLicense_back.jpg'"],
+            // "args": ["-mtarget", "-t", "'C:\\Users\\cason\\Downloads\\2 files'"],
+            "args": ["-mnormal"],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+        }
+    ]
+}
