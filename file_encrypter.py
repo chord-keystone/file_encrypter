@@ -1386,6 +1386,7 @@ class device_interface:
 
         if len(config.enc["management_auth"]) == 0:
             Messagebox.show_error("No management password set up. Select 'Change Management Key' from the configuration menu.")
+            return
 
         try:
             device = device_interface.get_device(include_unconfigured=True, prompt=False)
@@ -1814,8 +1815,8 @@ class uiroot(ttk.Window):
         
         try:
             device_interface.new_single_symmetric_key()
-        except ValueError as v:
-            Messagebox.show_error(f"Setup Failed: {v}", title="Error")
+        except Exception as e:
+            Messagebox.show_error(f"Setup Failed: {e}", title="Error")
             return
             
     @update_after
@@ -1832,16 +1833,16 @@ class uiroot(ttk.Window):
 
         try:
             device_interface.new_dual_key_symmetric_key()
-        except ValueError as v:
-            Messagebox.show_error(f"Setup Failed: {v}", title="Error")
+        except Exception as e:
+            Messagebox.show_error(f"Setup Failed: {e}", title="Error")
             return
 
     @update_after
     def first_time_device_setup(self) -> None:
         try:
             device_interface.first_time_device_setup()
-        except ValueError as v:
-            Messagebox.show_error(f"Setup Failed: {v}", title="Error")
+        except Exception as e:
+            Messagebox.show_error(f"Setup Failed: {e}", title="Error")
             return
 
     @update_after
@@ -1856,7 +1857,7 @@ class uiroot(ttk.Window):
 
         try:
             device_interface.generate_device_key()
-        except ValueError as v:
+        except Exception as v:
             Messagebox.show_error(f"Configuration Failed: {v}", title="Error")
 
     @update_after
@@ -1876,8 +1877,8 @@ class uiroot(ttk.Window):
 
         try:
             device_interface.update_management_password()
-        except ValueError as v:
-            Messagebox.show_error(f"Authentication Failed: {v}", title="Error")
+        except Exception as v:
+            Messagebox.show_error(f"Failed: {v}", title="Error")
             return
 
     @update_after

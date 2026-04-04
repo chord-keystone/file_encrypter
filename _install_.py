@@ -32,10 +32,14 @@ def install_windows():
     if not installroot.is_dir():
         installroot.mkdir()
     else:
-        # remove prior installation:
-        existing_installation = seq(installroot.rglob("*"))
-        existing_installation.filter(lambda x: x.is_file()).for_each(lambda x: x.unlink())
-        existing_installation.filter(lambda x: x.is_dir()).for_each(lambda x: x.rmdir())
+        # remove prior installation, besides config files:
+        for item in installroot.rglob("*"):
+            if item.is_file() and item.name not in ("configured_devices.json", "enc_config.json"):
+                item.unlink()
+        
+        for item in installroot.glob("*"):
+            if item.is_dir() and item.name not in ("context"):
+                shutil.rmtree(item)
         
     # verify installation package, and unzip
     print("Verifying installation package...")
@@ -90,10 +94,14 @@ def install_windows():
         return
 
     # generate new files:
-    (config_devices_file:=(installroot / "context" / "configured_devices.json")).touch()    
-    with config_devices_file.open('w') as ff:
-        # write a default empty object in configured devices file:
-        ff.write("{}")
+    (config_devices_file:=(installroot / "context" / "configured_devices.json")).touch()
+    with config_devices_file.open('r') as ff:
+        temp_data = ff.read()
+
+    if len(temp_data) == 0:
+        with config_devices_file.open('w') as ff:
+            # write a default empty object in configured devices file:
+            ff.write("{}")
 
     # two empty files:
     (installroot / "etc" / "config.yml").touch()
@@ -102,7 +110,13 @@ def install_windows():
     # correct the naming for the encryption config file
     enc_config_file = installroot / "context" / "enc_config.json"
     san_enc_config = installroot / "context" / "enc_config_san.json"
-    san_enc_config.rename(enc_config_file)
+
+    # only replace if it doesn't exist:
+    if not enc_config_file.exists():
+        san_enc_config.rename(enc_config_file)
+    else:
+        # if it exists, we don't need the copy.
+        san_enc_config.unlink()
 
     # set up a management salt:
     with enc_config_file.open('r') as file:
@@ -136,10 +150,22 @@ def install_windows():
 
         # rename without an underscore and save the link paths:
         temp_path = (desktop_path.absolute() / shortcut.name).with_suffix(".lnk")
-        temp_path.rename(desktop_shortcut_file_name:=str(temp_path).replace("File_Encrypter", "File Encrypter"))
+        desktop_shortcut_file_name=str(temp_path).replace("File_Encrypter", "File Encrypter")
+        if not pathlib.Path(desktop_shortcut_file_name).exists():
+            temp_path.rename(desktop_shortcut_file_name)
+        else:
+            # if it already exists, just replace it
+            pathlib.Path(desktop_shortcut_file_name).unlink()
+            temp_path.rename(desktop_shortcut_file_name)
 
         temp_path = (pathlib.Path(shortcut.startmenu_dir) / shortcut.name).with_suffix(".lnk")
-        temp_path.rename(start_menu_shortcut_file_name:=str(temp_path).replace("File_Encrypter", "File Encrypter"))
+        start_menu_shortcut_file_name = str(temp_path).replace("File_Encrypter", "File Encrypter")
+
+        if not pathlib.Path(start_menu_shortcut_file_name).exists():
+            temp_path.rename(start_menu_shortcut_file_name)
+        else:
+            pathlib.Path(start_menu_shortcut_file_name).unlink()
+            temp_path.rename(start_menu_shortcut_file_name)
 
     except Exception as e:
         print(f"Could not generate shortcut: {e}")
@@ -153,7 +179,6 @@ def install_windows():
             yaml.dump(etc_vars, config_stream, Dumper=yaml.Dumper)
 
     # registry keys:
-    # TODO: correct the syntax
     try:
 
         command_string = f"\"{py_exe_path}\" \"{path_to_script}\" -mtarget -t\"%1\""

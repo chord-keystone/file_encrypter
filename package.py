@@ -20,7 +20,8 @@ def main():
                     pkg.write(subitem.relative_to(thisfile.parent))
 
         pkg.write("file_encrypter.py")
-        pkg.write("uninstall.py")
+        pkg.write("uninstall.bat")
+        pkg.write("_uninstall_.py")
 
     container = pathlib.Path(".") / ("file_encrypter_v" + VERSION_STRING)
     if not container.is_dir():
