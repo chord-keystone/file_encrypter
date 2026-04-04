@@ -187,7 +187,12 @@ class file_encrypter:
                 self.head_first_bytes = config.enc["signature_device"]
                 self.header["method"] = "device"
                 match config.rsa_or_ec:
+                   
                     case "rsa":
+
+                        if config.enc["skey_base"] == "00":
+                            Messagebox.show_error("Device symmetric key is either not set up or configured to EC when device is set up for RSA. Select 'New Symmetric Key' from the configuration menu.")
+                            return
 
                         try:
                             _symm_key = self._asymmetryc_decrypt(config.enc["skey_base"])
@@ -741,7 +746,7 @@ class device_interface:
     @staticmethod
     def update_management_password() -> None:
 
-        if config.enc["management_auth"] is not None:
+        if len(config.enc["management_auth"]) > 0:
             
             # get current pw:
             try:
@@ -799,6 +804,31 @@ class device_interface:
             
             for name in config.device.keys():
                 config.update_device_parameter({name: {"management_key": file_encrypter.simple_encrypt(unwrapped_mgmt_keys[name], new_management_encryptor).hex()}})
+
+            Messagebox.show_info("Management password updated.", title="Success")
+
+        else: 
+        # new management password!
+            if len(config.device) != 0:
+                Messagebox.show_error("Cannot reset management password while devices are configred. Remove all configured devices first.")
+                return
+
+            try:
+                new_pw = file_encrypter.get_password(encrypt_action.encrypt_password)
+            except ValueError:
+                return
+            
+            new_deriver = Argon2id(
+                memory_cost=64*1024,
+                iterations=3,
+                lanes=4,
+                length=32,
+                salt=(new_salt:=token_bytes(16))
+            )
+
+            new_hash = new_deriver.derive(new_pw.encode())
+            config.update_enc({"management_auth": new_hash.hex()})
+            config.update_enc({"man_salt": new_salt.hex()})
 
             Messagebox.show_info("Management password updated.", title="Success")
            
@@ -1075,7 +1105,7 @@ class device_interface:
     @staticmethod
     def new_single_symmetric_key(unprompted:bool=False) -> None:
         
-        rng = paranoid_random(256)
+        rng = paranoid_random.paranoid_random(256)
 
         if not unprompted:
             # confirm
@@ -1086,6 +1116,15 @@ class device_interface:
             )
             conf_dlg.show(None, True)
             if conf_dlg.result != 0:
+                return
+                
+            stronger_warning = ui_utils.ButtonOptionsDialog(
+                prompt=f"WARNING. If you continue and have encrypted files that used this device, you will PERMANENTLY lose access to these. Continue?",
+                items=["Yes", "No"],
+                title="Confirmation"
+            )
+            stronger_warning.show(None, True)
+            if stronger_warning.result != 0:
                 return
             
             # authenticate
@@ -1140,7 +1179,7 @@ class device_interface:
     def new_dual_key_symmetric_key() -> None:
 
         conf_dlg = ui_utils.ButtonOptionsDialog(
-            prompt="Setting up new key for both configured devices. This will overwrite the existing key. Are you sure?",
+            prompt="Setting up new key for both configured devices. This will overwrite the slots in 9D. Are you sure?",
             items=["Yes", "No"],
             title="Confirm"
         )
@@ -1148,6 +1187,15 @@ class device_interface:
         if conf_dlg.result != 0:
             return
         
+        stronger_warning = ui_utils.ButtonOptionsDialog(
+            prompt=f"WARNING. If you continue and have encrypted files that used either of these devices alone, you will PERMANENTLY lose access to these. Continue?",
+            items=["Yes", "No"],
+            title="Confirmation"
+        )
+        stronger_warning.show(None, True)
+        if stronger_warning.result != 0:
+            return
+
         # check to see if 2 devices are even set up:
         if not config.device or len(config.device) < 2:
             raise KeyError("Dual key setup requires two configured devices.")
@@ -1157,7 +1205,7 @@ class device_interface:
         else:
             # check if there are two public keys in the config dict for each device:
             for k, v in config.device.items():
-                if "public_key" in v and v["public_key"] == "00":
+                if "key_type" in v and (v["key_type"] == "None" or v["key_type"].find("RSA") != -1):
                     raise ValueError(f"Device '{k}' does not have a valid EC public key. Re-run 'Generate Device Key'.")
             
             if len(nonunique_keytypes:=seq(config.device.values()).map(lambda x: x["key_type"]).distinct().to_list()) > 1:
@@ -1203,6 +1251,15 @@ class device_interface:
         )
         conf_dlg.show(None, True)
         if conf_dlg.result != 0:
+            return
+        
+        stronger_warning = ui_utils.ButtonOptionsDialog(
+            prompt=f"WARNING. If you continue and have encrypted files that used this device, you will PERMANENTLY lose access to these. Continue?",
+            items=["Yes", "No"],
+            title="Confirmation"
+        )
+        stronger_warning.show(None, True)
+        if stronger_warning.result != 0:
             return
         
         # we will need the correct management key:
@@ -1301,6 +1358,15 @@ class device_interface:
         if conf_dlg.result != 0:
             return
         
+        stronger_warning = ui_utils.ButtonOptionsDialog(
+            prompt=f"WARNING. If you continue and have encrypted files that used this device, you will PERMANENTLY lose access to these. Continue?",
+            items=["Yes", "No"],
+            title="Confirmation"
+        )
+        stronger_warning.show(None, True)
+        if stronger_warning.result != 0:
+            return
+                
         # remove the device:
         with open(config.installroot / "context" / "configured_devices.json", 'r') as f:
             configured = ujson.load(f)
@@ -1317,6 +1383,9 @@ class device_interface:
     def first_time_device_setup() -> None:
         """ First time device setup. Updates the device configuration file with the new information.
         """
+
+        if len(config.enc["management_auth"]) == 0:
+            Messagebox.show_error("No management password set up. Select 'Change Management Key' from the configuration menu.")
 
         try:
             device = device_interface.get_device(include_unconfigured=True, prompt=False)
@@ -1429,7 +1498,7 @@ class device_interface:
 
         # update the config file:
         config.update_device(config_entry)
-        Messagebox.show_info("Device successfully set up. Run 'Configure Device' to set up keys.", title="Success")
+        Messagebox.show_info("Device successfully set up. Run 'New Symmetric Key' to set up key", title="Success")
 
 class head_obscuration:
 
@@ -1836,39 +1905,18 @@ class uiroot(ttk.Window):
             self.config_root.rowconfigure(tuple(range(6)), weight=1)
 
             row_id = 0
+            mgmt_but = ttk.Button(self.config_root,
+                        text="Change Management Key",
+                        command=self.new_mgmt_pass,
+                        bootstyle=("LIGHT", "OUTLINE"))
+            mgmt_but.grid(row=row_id, column=0, columnspan=2, pady=10, padx=10, sticky="ew")
+            row_id += 1
+
             devsetup_but = ttk.Button(self.config_root,
                         text="First Time Device Setup", 
                         command=self.first_time_device_setup,
                         bootstyle=("LIGHT", "OUTLINE"))
             devsetup_but.grid(row=row_id, column=0, columnspan=2, pady=10, padx=10, sticky="ew")
-            row_id += 1
-
-            devrem_but = ttk.Button(self.config_root,
-                        text="Remove Device", 
-                        command=self.remove_device,
-                        bootstyle=("LIGHT", "OUTLINE"))
-            devrem_but.grid(row=row_id, column=0, columnspan=2, pady=10, padx=10, sticky="ew")
-            row_id += 1
-
-            skey_but = ttk.Button(self.config_root,
-                        text="New Symmetric Key", 
-                        command=self.new_symm_key,
-                        bootstyle=("LIGHT", "OUTLINE"))
-            skey_but.grid(row=row_id, column=0, columnspan=2, pady=10, padx=10, sticky="ew")
-            row_id += 1
-
-            cfgdev_but = ttk.Button(self.config_root,
-                        text="Generate Device Key",
-                        command=self.generate_device_key,
-                        bootstyle=("LIGHT", "OUTLINE"))
-            cfgdev_but.grid(row=row_id, column=0, columnspan=2, pady=10, padx=10, sticky="ew")
-            row_id += 1
-
-            dual_but = ttk.Button(self.config_root,
-                        text="Generate Paired Device Key", 
-                        command=self.setup_dual_key,
-                        bootstyle=("LIGHT", "OUTLINE"))
-            dual_but.grid(row=row_id, column=0, columnspan=2, pady=10, padx=10, sticky="ew")
             row_id += 1
 
             keytype_but = ttk.Button(self.config_root,
@@ -1878,18 +1926,61 @@ class uiroot(ttk.Window):
             keytype_but.grid(row=row_id, column=0, columnspan=2, pady=10, padx=10, sticky="ew")
             row_id += 1
 
-            mgmt_but = ttk.Button(self.config_root,
-                        text="Change Management Key",
-                        command=self.new_mgmt_pass,
+            cfgdev_but = ttk.Button(self.config_root,
+                        text="Generate Device Key",
+                        command=self.generate_device_key,
                         bootstyle=("LIGHT", "OUTLINE"))
-            mgmt_but.grid(row=row_id, column=0, columnspan=2, pady=10, padx=10, sticky="ew")
+            cfgdev_but.grid(row=row_id, column=0, columnspan=2, pady=10, padx=10, sticky="ew")
             row_id += 1
+
+            skey_but = ttk.Button(self.config_root,
+                        text="New Symmetric Key", 
+                        command=self.new_symm_key,
+                        bootstyle=("LIGHT", "OUTLINE"))
+            skey_but.grid(row=row_id, column=0, columnspan=2, pady=10, padx=10, sticky="ew")
+            row_id += 1
+
+            dual_but = ttk.Button(self.config_root,
+                        text="Generate Paired Device Key", 
+                        command=self.setup_dual_key,
+                        bootstyle=("LIGHT", "OUTLINE"))
+            dual_but.grid(row=row_id, column=0, columnspan=2, pady=10, padx=10, sticky="ew")
+            row_id += 1
+            
+            devrem_but = ttk.Button(self.config_root,
+                        text="Remove Device", 
+                        command=self.remove_device,
+                        bootstyle=("LIGHT", "OUTLINE"))
+            devrem_but.grid(row=row_id, column=0, columnspan=2, pady=10, padx=10, sticky="ew")
+            row_id += 1
+
+            def print_information():
+                info_dlg = ui_utils.ListedDialog(
+                    message_beforelist="Configuration Menu Information:",
+                    list_message=["1. Change Management Key - set up or change the device management key. Run this first, before setting up any devices.", "",
+                                  "2. First Time Device Setup - configures a device for the first time, sets up the management authority to add keys to the device slots",  "",
+                                  "3. Change Key Type - select the type of asymmetric device key you would like to use. If you don't know what these options are, a quick online search can tell you all you need to know", "",
+                                  "4. Generate Device Key - creates a new private/public key pair on the device slot 9D. Overwrites any existing keys that are there. You must have configured the device, and have the management key handy", "",
+                                  "5. New Symmetric Key - creates a new encrypted symmetric key locally, which only the device's asymmetric key can unlock. Device-based encryption is always performed with this symmetric key.", "",
+                                  "6. Generate Paired Device Key - if you have two configured devices, this sets up a Diffie-Hellman exchange where both devices can decrypt the symmetric key and perform device-based encryption. Requires two configured devices, and you must run Generate Device Key on both, with the key type set to an EC Key.", "",
+                                  "7. Remove Device - removes a device from the configured devices list"
+                                  ],
+                    message_afterlist="Press OK to continue",
+                    buttons=["OK"]
+                )
+                info_dlg.show()                
+            
+            info_but = ttk.Button(self.config_root, 
+                                  text="Info", 
+                                  command=print_information,
+                                  bootstyle=("INFO", "OUTLINE"))
+            info_but.grid(row=row_id, column=0, columnspan=1, pady=10, padx=10, sticky="ew")
 
             ok_but = ttk.Button(self.config_root,
                         text="OK", 
                         command=self.config_root.withdraw,
                         bootstyle="DANGER")
-            ok_but.grid(row=row_id, column=0, columnspan=2, pady=10, padx=10, sticky="ew")
+            ok_but.grid(row=row_id, column=1, columnspan=1, pady=10, padx=10, sticky="ew")
             row_id += 1
 
             # you can't get rid of the babadook

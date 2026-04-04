@@ -17,8 +17,8 @@ def main():
                 if subitem.is_file() and subitem.parent.name != "__pycache__" and subitem.name not in ("configured_devices.json", "enc_config.json"):
                     pkg.write(subitem.relative_to(thisfile.parent))
 
-        pkg.write("encryption_list.txt")
         pkg.write("file_encrypter.py")
+        pkg.write("uninstall.py")
 
 if __name__ == '__main__':
     main()

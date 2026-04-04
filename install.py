@@ -1,5 +1,5 @@
 import platform, json, yaml, pathlib, venv, subprocess, pyshortcuts, os, shutil
-from ttkbootstrap.dialogs import Messagebox
+from secrets import token_bytes
 
 # from pyuac import main_requires_admin
 from zipfile import ZipFile
@@ -34,7 +34,7 @@ def install_windows():
         with ZipFile(package, "r") as z:
             z.extractall(installroot)
     except Exception as e:
-        Messagebox.show_error(f"Error unzipping: {e}", "Error")
+        print(f"Error unzipping: {e}")
         return        
 
     # create venv at the install location
@@ -51,7 +51,7 @@ def install_windows():
             python -m pip install -r {str(installroot / "etc" / "dependencies.conf")}", shell=True)
         
     except Exception as e:
-        Messagebox.show_error(f"Error encountered while generating python dependencies: {e}. Rolling back installation")
+        print(f"Error encountered while generating python dependencies: {e}. Rolling back installation")
         shutil.rmtree(installroot / ".venv")
         return
         
@@ -73,21 +73,30 @@ def install_windows():
             assert file.is_file()
 
     except AssertionError as e:
-        Messagebox.show_error(f"Error validating installation files: {e}")
+        print(f"Error validating installation files: {e}")
         return
 
     # generate new files:
     (config_devices_file:=(installroot / "context" / "configured_devices.json")).touch()    
     with config_devices_file.open('w') as ff:
-        # write a default empty object in the file:
+        # write a default empty object in configured devices file:
         ff.write("{}")
 
+    # two empty files:
     (installroot / "etc" / "config.yml").touch()
+    (installroot / "encryption_list.txt").touch()
 
     # correct the naming for the encryption config file
     enc_config_file = installroot / "context" / "enc_config.json"
     san_enc_config = installroot / "context" / "enc_config_san.json"
     san_enc_config.rename(enc_config_file)
+
+    # set up a management salt:
+    with enc_config_file.open('r') as file:
+        enc_config_data = json.loads(file.read())
+    enc_config_data['man_salt'] = token_bytes(16).hex()
+    with enc_config_file.open('w') as file:
+        file.write(json.dumps(enc_config_data))
 
     # set up the /etc/yaml variables, which will be referenced by the program later
     etc_vars = {"root":str(installroot)}
@@ -114,17 +123,18 @@ def install_windows():
 
         # rename without an underscore and save the link paths:
         temp_path = (desktop_path.absolute() / shortcut.name).with_suffix(".lnk")
-        temp_path.rename(temp_newname:=str(temp_path).replace("File_Encrypter", "File Encrypter"))
-        shortcut_paths['desktop_shortcut'] = temp_newname
+        temp_path.rename(desktop_shortcut_file_name:=str(temp_path).replace("File_Encrypter", "File Encrypter"))
 
         temp_path = (pathlib.Path(shortcut.startmenu_dir) / shortcut.name).with_suffix(".lnk")
-        temp_path.rename(temp_newname:=str(temp_path).replace("File_Encrypter", "File Encrypter"))
-        shortcut_paths['startmenu_shortcut'] = temp_newname
+        temp_path.rename(start_menu_shortcut_file_name:=str(temp_path).replace("File_Encrypter", "File Encrypter"))
 
     except Exception as e:
-        Messagebox.show_warning(f"Could not generate shortcut: {e}")
+        print(f"Could not generate shortcut: {e}")
         
     finally:
+        shortcut_paths['desktop_shortcut'] = desktop_shortcut_file_name
+        shortcut_paths['startmenu_shortcut'] = start_menu_shortcut_file_name
+
         etc_vars['shortcut_paths'] = shortcut_paths
         with (installroot / "etc" / "config.yml").open('w') as config_stream:
             yaml.dump(etc_vars, config_stream, Dumper=yaml.Dumper)
@@ -182,7 +192,7 @@ def install_windows():
         winreg.CloseKey(file_command_key)
 
     except Exception as e:
-        Messagebox.show_error(f"Error generating file extension associations and/or context menu shortcuts: {e}. Rolling back:")
+        print(f"Error generating file extension associations and/or context menu shortcuts: {e}. Rolling back:")
         for k, v in reg_keys:
             winreg.DeleteKey(*v)
         return 

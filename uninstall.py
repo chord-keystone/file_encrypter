@@ -1,5 +1,6 @@
 import pathlib, winreg, shutil, yaml
 from ttkbootstrap.dialogs import MessageDialog, Messagebox
+from file_encrypter_utils import ui_utils
 
 def main():
     
@@ -7,6 +8,15 @@ def main():
     confirm_button.show(wait_for_result=True)
     
     if confirm_button.result != "Yes":
+        return
+    
+    stronger_warning = ui_utils.ButtonOptionsDialog(
+                prompt=f"WARNING. If you continue and have encrypted files from this program, you will lose access to them. This is PERMANENT and IRREVERSIBLE. If you want it to be reversible, make a backup of the 'file_encrypter/context' folder and use it later. Continue with uninstall?",
+                items=["Yes", "No"],
+                title="Confirmation"
+            )
+    stronger_warning.show(None, True)
+    if stronger_warning.result != 0:
         return
 
     # closes the ttk menu

@@ -77,7 +77,7 @@ class ListedDialog(Dialog):
                 message_label.pack(pady=(0, 3), fill=X, anchor=N)
 
         if self._list_msg:
-            scrollist = ScrolledText(master=container, wrap=NONE, width=self._width, height=10)
+            scrollist = ScrolledText(master=container, wrap=WORD, width=self._width, height=10)
             for ele in self._list_msg:
                 scrollist.insert(INSERT, str(ele) + "\n")
 
