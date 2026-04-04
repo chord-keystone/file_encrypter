@@ -5,12 +5,13 @@ from os import startfile
 from file_encrypter_utils.utils import file_entry_manager
 
 # UI things
+import ttkbootstrap as ttk
 from ttkbootstrap.dialogs import *
+from ttkbootstrap.dialogs.message import *
 from tkinter.scrolledtext import ScrolledText
 from tkinter.filedialog import askdirectory
 from itertools import cycle
 from PIL import Image, ImageTk, ImageSequence
-
 
 class ListedDialog(Dialog):
 
@@ -78,7 +79,7 @@ class ListedDialog(Dialog):
         if self._list_msg:
             scrollist = ScrolledText(master=container, wrap=NONE, width=self._width, height=10)
             for ele in self._list_msg:
-                scrollist.insert(ttk.INSERT, str(ele) + "\n")
+                scrollist.insert(INSERT, str(ele) + "\n")
 
             scrollist.configure(state="disabled")
             scrollist.pack(pady=(0, 3), fill=X, anchor=N)

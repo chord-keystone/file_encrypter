@@ -49,7 +49,11 @@ from ttkbootstrap.dialogs import Messagebox, QueryDialog
 import ttkbootstrap as ttk
 
 # global instances:
-config = cfg.config_loader()
+try:
+    config = cfg.config_loader()
+except FileNotFoundError as e:
+    Messagebox.show_error(e.strerror, "Error")
+
 FILE_BUFFER_MAX = 2**31-1
 MAX_PATH = 255
 PAD_TGT = 125

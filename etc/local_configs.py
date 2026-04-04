@@ -12,8 +12,17 @@ installroot = pathlib.Path(etc_config['root'])
 class config_loader:
     
     def __init__(self):
-        self.enc = dict_fromhex(ujson.load(open(installroot / "context" / "enc_config.json", "r")))
-        self.device = ujson.load(open(installroot / "context" / "configured_devices.json", "r"))
+
+        try:
+            self.enc = dict_fromhex(ujson.load(open(installroot / "context" / "enc_config.json", "r")))
+        except FileNotFoundError as e:
+            raise FileNotFoundError("Encryption settings configuration file not found. Check installation.")
+        
+        try:
+            self.device = ujson.load(open(installroot / "context" / "configured_devices.json", "r"))
+        except FileNotFoundError as e:
+            raise FileNotFoundError("Supported devices configuration file not found. Check installation.")
+
         self.get_tempdir()
         self.installroot = installroot
 
