@@ -23,12 +23,11 @@ def main():
     if stronger_confirmation != "yes":
         return
     
-    etc_path = pathlib.Path("C://", "Users", "cason", "Desktop", "test", "file_encrypter", "etc")
+    etc_path = (pathlib.Path(__file__).parent / "etc").absolute()
     if not etc_path.exists():
         print("Installation configuration file location does not appear to exist")
         return
-        
-    # etc_path = pathlib.Path(".", "etc").absolute()
+    
     with (etc_path / "config.yml").open('r') as buf:
         config = yaml.load(buf, yaml.Loader)
     
@@ -47,7 +46,18 @@ def main():
                 print(f"Reg. Key {v[-1]} not found: {e}")
 
     # remove the installation directory
-    shutil.rmtree(config['root'])
+    for item in (temp_root_path:=pathlib.Path(config['root'])).rglob("*"):
+        if item.is_file() and item.name not in ("enc_config.json", "configured_devices.json", "encryption_list.txt"):
+            item.unlink()
+
+    for item in temp_root_path.glob("*"):
+        if item.is_dir() and item.name not in ("context"):
+            shutil.rmtree(item)
+
+    print("Uninstall Complete. Encryption configuration files still remain just in case. You may close this terminal.")
 
 if __name__ == "__main__":
-    main()
+    if (pathlib.Path(__file__).parent / ".git").exists():
+        print("Cannot run uninstall script inside of repo.")
+    else:
+        main()

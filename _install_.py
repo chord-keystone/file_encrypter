@@ -34,7 +34,7 @@ def install_windows():
     else:
         # remove prior installation, besides config files:
         for item in installroot.rglob("*"):
-            if item.is_file() and item.name not in ("configured_devices.json", "enc_config.json"):
+            if item.is_file() and item.name not in ("configured_devices.json", "enc_config.json", "encryption_list.txt"):
                 item.unlink()
         
         for item in installroot.glob("*"):
@@ -113,17 +113,19 @@ def install_windows():
 
     # only replace if it doesn't exist:
     if not enc_config_file.exists():
+
         san_enc_config.rename(enc_config_file)
+        
+        # set up a management salt:
+        with enc_config_file.open('r') as file:
+            enc_config_data = json.loads(file.read())
+        enc_config_data['man_salt'] = token_bytes(16).hex()
+        with enc_config_file.open('w') as file:
+            file.write(json.dumps(enc_config_data))
+
     else:
         # if it exists, we don't need the copy.
         san_enc_config.unlink()
-
-    # set up a management salt:
-    with enc_config_file.open('r') as file:
-        enc_config_data = json.loads(file.read())
-    enc_config_data['man_salt'] = token_bytes(16).hex()
-    with enc_config_file.open('w') as file:
-        file.write(json.dumps(enc_config_data))
 
     # set up the /etc/yaml variables, which will be referenced by the program later
     etc_vars = {"root":str(installroot)}
@@ -138,12 +140,6 @@ def install_windows():
     path_to_script = installroot / "file_encrypter.py"
     desktop_path = pathlib.Path("C:\\") / "Users" / os.getenv("USERNAME") / "Desktop"
     
-    from pyshortcuts import utils
-    def temp_func(input:str):
-        return input
-    
-    utils.fix_filename = temp_func
-
     try:
         # make the shortcut
         shortcut = pyshortcuts.make_shortcut(str(py_exe_path) + " " + str(installroot / "file_encrypter.py -mnormal"), "File Encrypter", str(installroot), None, str(desktop_icon), str(desktop_path), None)
