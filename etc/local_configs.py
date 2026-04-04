@@ -1,12 +1,11 @@
 import yaml, pathlib, ujson
 from os import getenv
-from winreg import OpenKey, QueryValueEx, HKEY_CURRENT_USER
 from file_encrypter_utils.utils import dict_fromhex
 from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives import serialization
 import yubikit.piv as piv
 
-etc_config = yaml.load((pathlib.Path(".") / "etc" / "config.yml").open("r"), Loader=yaml.Loader)
+etc_config = yaml.load((pathlib.Path(__file__).parent / "config.yml").open("r"), Loader=yaml.Loader)
 installroot = pathlib.Path(etc_config['root'])
 
 class config_loader:

@@ -2015,13 +2015,13 @@ def single_target_mode(target_path:pathlib.Path) -> None:
     ttk.Label(master=root, text="Processing...").pack()
 
     # check if the file is already encrypted
-    if file_encrypter.is_encrypted(str(target_path)):
+    if file_encrypter.is_encrypted(target_path):
         
-        action = file_encrypter.check_encryption_method(str(target_path))
+        action = file_encrypter.check_encryption_method(target_path)
 
         # simple decrypt:
         e = file_encrypter(
-                file_source=seq(str(target_path)),
+                file_source=seq((target_path,)),
                 action=action
             )
         

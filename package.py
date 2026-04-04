@@ -27,7 +27,7 @@ def main():
         container.mkdir()
 
     shutil.copyfile(zip_path, container / "package.zip")
-    shutil.copyfile("install.py", container / "install.py")
+    shutil.copyfile("_install_.py", container / "_install_.py")
     shutil.copyfile("install.bat", container / "install.bat")
 
 if __name__ == '__main__':

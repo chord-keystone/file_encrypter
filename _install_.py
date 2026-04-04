@@ -153,7 +153,10 @@ def install_windows():
             yaml.dump(etc_vars, config_stream, Dumper=yaml.Dumper)
 
     # registry keys:
+    # TODO: correct the syntax
     try:
+
+        command_string = f"\"{py_exe_path}\" \"{path_to_script}\" -mtarget -t\"%1\""
         
         target_file_ext = json.load((installroot / "context" / "enc_config.json").open("r"))["file_extension"]["value"]
         file_ext_key_name = target_file_ext.lstrip(".").upper()
@@ -162,7 +165,7 @@ def install_windows():
         reg_keys["extension_key"] = (winreg.HKEY_CLASSES_ROOT, target_file_ext)
         extension_key = winreg.CreateKey(*reg_keys["extension_key"])
         winreg.SetValueEx(extension_key, "", 0, winreg.REG_SZ, file_ext_key_name)
-        winreg.CloseKey(extension_key)    
+        winreg.CloseKey(extension_key)
 
         # file extension open description:
         reg_keys["open_key"] = (winreg.HKEY_CLASSES_ROOT, f"{file_ext_key_name}\\shell\\open")
@@ -173,7 +176,7 @@ def install_windows():
         # file extension command
         reg_keys["class_key"] = (winreg.HKEY_CLASSES_ROOT, f"{file_ext_key_name}\\shell\\open\\command")
         class_key = winreg.CreateKey(*reg_keys["class_key"])
-        winreg.SetValueEx(class_key, "", 0, winreg.REG_SZ, f"{py_exe_path} {path_to_script} -mtarget -t%1")
+        winreg.SetValueEx(class_key, "", 0, winreg.REG_SZ, command_string)
         winreg.CloseKey(class_key)
 
         # and icon
@@ -190,7 +193,7 @@ def install_windows():
 
         reg_keys["dir_command_key"] = (winreg.HKEY_CLASSES_ROOT, f"Directory\\shell\\file_encrypter\\command")
         dir_command_key = winreg.CreateKey(*reg_keys["dir_command_key"])
-        winreg.SetValueEx(dir_command_key, "", 0, winreg.REG_SZ, f"{py_exe_path} {path_to_script} -mtarget -t%1")
+        winreg.SetValueEx(dir_command_key, "", 0, winreg.REG_SZ, command_string)
         winreg.CloseKey(dir_command_key)
 
         # context menu entry for files (old context menu)
@@ -200,9 +203,9 @@ def install_windows():
         winreg.SetValueEx(file_key, "Icon", 0, winreg.REG_SZ, str(context_menu_icon))
         winreg.CloseKey(file_key)
 
-        reg_keys["file_command_key"] = (winreg.HKEY_CLASSES_ROOT, f"Directory\\shell\\file_encrypter\\command")
+        reg_keys["file_command_key"] = (winreg.HKEY_CLASSES_ROOT, f"*\\shell\\file_encrypter\\command")
         file_command_key = winreg.CreateKey(*reg_keys["file_command_key"])
-        winreg.SetValueEx(file_command_key, "", 0, winreg.REG_SZ, f"{py_exe_path} {path_to_script} -mtarget -t%1")
+        winreg.SetValueEx(file_command_key, "", 0, winreg.REG_SZ, command_string)
         winreg.CloseKey(file_command_key)
 
     except Exception as e:
@@ -216,7 +219,7 @@ def install_windows():
         with (installroot / "etc" / "config.yml").open('w') as config_stream:
             yaml.dump(etc_vars, config_stream, Dumper=yaml.Dumper)
     
-    print("Complete")
+    print("Complete. You may close this terminal.")
 
 def main():
     match platform.uname().system:
