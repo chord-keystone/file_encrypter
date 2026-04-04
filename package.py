@@ -1,5 +1,7 @@
-import zipfile, pathlib, subprocess
+import zipfile, pathlib, subprocess, shutil
 from functional import seq
+
+VERSION_STRING = "1.0"
 
 def main():
 
@@ -10,7 +12,7 @@ def main():
        
     thisfile = pathlib.Path(__file__)
     fldr_list = [pathlib.Path(thisfile.parent) / ele for ele in ("context", "etc", "file_encrypter_utils", "resources")]
-    with zipfile.ZipFile(pathlib.Path(thisfile.parent) / "package.zip", 'w') as pkg:
+    with zipfile.ZipFile(zip_path:=(pathlib.Path(thisfile.parent) / "package.zip"), 'w') as pkg:
         for item in fldr_list:
             pkg.write(item.relative_to(thisfile.parent))
             for subitem in item.rglob("*"):
@@ -20,5 +22,14 @@ def main():
         pkg.write("file_encrypter.py")
         pkg.write("uninstall.py")
 
+    container = pathlib.Path(".") / ("file_encrypter_v" + VERSION_STRING)
+    if not container.is_dir():
+        container.mkdir()
+
+    shutil.copyfile(zip_path, container / "package.zip")
+    shutil.copyfile("install.py", container / "install.py")
+    shutil.copyfile("install.bat", container / "install.bat")
+
 if __name__ == '__main__':
     main()
+    

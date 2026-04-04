@@ -5,7 +5,20 @@ from secrets import token_bytes
 from zipfile import ZipFile
 from functional import seq
 
+def has_admin_windows():
+    try:
+        temp = os.listdir(os.sep.join([os.environ.get('SystemRoot','C:\\windows'),'temp']))
+    except:
+        return False
+    else:
+        return True
+
 def install_windows():
+
+    if not has_admin_windows():
+        print("Admin privilege is needed for install. Rerun as admin.")
+        input("Press enter to continue")
+        return
 
     import winreg # will need this shortly
 
@@ -139,8 +152,9 @@ def install_windows():
         with (installroot / "etc" / "config.yml").open('w') as config_stream:
             yaml.dump(etc_vars, config_stream, Dumper=yaml.Dumper)
 
+    # registry keys:
     try:
-        # registry editing:
+        
         target_file_ext = json.load((installroot / "context" / "enc_config.json").open("r"))["file_extension"]["value"]
         file_ext_key_name = target_file_ext.lstrip(".").upper()
         
@@ -204,7 +218,6 @@ def install_windows():
     
     print("Complete")
 
-# @main_requires_admin
 def main():
     match platform.uname().system:
         case "Windows":
