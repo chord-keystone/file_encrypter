@@ -1609,6 +1609,10 @@ class uiroot(ttk.Window):
 
     def updatevars(self):
 
+        if hasattr(self, 'config_root') and self.busy_status():
+            # skip the update loop if the user is in the config menu
+            return
+        
         self.refuse_to_encrypt = False
 
         # get the list of files to encrypt
@@ -1953,41 +1957,48 @@ class uiroot(ttk.Window):
                         bootstyle=("LIGHT", "OUTLINE"))
             devrem_but.grid(row=row_id, column=0, columnspan=2, pady=10, padx=10, sticky="ew")
             row_id += 1
-
-            def print_information():
-                info_dlg = ui_utils.ListedDialog(
-                    message_beforelist="Configuration Menu Information:",
-                    list_message=["1. Change Management Key - set up or change the device management key. Run this first, before setting up any devices.", "",
-                                  "2. First Time Device Setup - configures a device for the first time, sets up the management authority to add keys to the device slots",  "",
-                                  "3. Change Key Type - select the type of asymmetric device key you would like to use. If you don't know what these options are, a quick online search can tell you all you need to know", "",
-                                  "4. Generate Device Key - creates a new private/public key pair on the device slot 9D. Overwrites any existing keys that are there. You must have configured the device, and have the management key handy", "",
-                                  "5. New Symmetric Key - creates a new encrypted symmetric key locally, which only the device's asymmetric key can unlock. Device-based encryption is always performed with this symmetric key.", "",
-                                  "6. Generate Paired Device Key - if you have two configured devices, this sets up a Diffie-Hellman exchange where both devices can decrypt the symmetric key and perform device-based encryption. Requires two configured devices, and you must run Generate Device Key on both, with the key type set to an EC Key.", "",
-                                  "7. Remove Device - removes a device from the configured devices list"
-                                  ],
-                    message_afterlist="Press OK to continue",
-                    buttons=["OK"]
-                )
-                info_dlg.show()                
             
+            # print some help for the user
             info_but = ttk.Button(self.config_root, 
                                   text="Info", 
-                                  command=print_information,
+                                  command=self.print_config_information,
                                   bootstyle=("INFO", "OUTLINE"))
             info_but.grid(row=row_id, column=0, columnspan=1, pady=10, padx=10, sticky="ew")
 
+            # OK button to complete configuration
             ok_but = ttk.Button(self.config_root,
                         text="OK", 
-                        command=self.config_root.withdraw,
+                        command=lambda: self.config_root.withdraw() or self.busy_forget(),
                         bootstyle="DANGER")
             ok_but.grid(row=row_id, column=1, columnspan=1, pady=10, padx=10, sticky="ew")
             row_id += 1
 
             # you can't get rid of the babadook
-            self.config_root.protocol("WM_DELETE_WINDOW", self.config_root.withdraw)
+            self.config_root.protocol("WM_DELETE_WINDOW", lambda: self.config_root.withdraw() or self.busy_forget())
+            self.busy()
+
         else: 
             self.config_root.deiconify()
             self.config_root.lift()
+            self.busy()
+
+    @staticmethod
+    def print_config_information():
+        info_dlg = ui_utils.ListedDialog(
+            message_beforelist="Configuration Menu Information:",
+            list_message=["1. Change Management Key - set up or change the device management key. Run this first, before setting up any devices.", "",
+                            "2. First Time Device Setup - configures a device for the first time, sets up the management authority to add keys to the device slots",  "",
+                            "3. Change Key Type - select the type of asymmetric device key you would like to use. If you don't know what these options are, a quick online search can tell you all you need to know", "",
+                            "4. Generate Device Key - creates a new private/public key pair on the device slot 9D. Overwrites any existing keys that are there. You must have configured the device, and have the management key handy", "",
+                            "5. New Symmetric Key - creates a new encrypted symmetric key locally, which only the device's asymmetric key can unlock. Device-based encryption is always performed with this symmetric key.", "",
+                            "6. Generate Paired Device Key - if you have two configured devices, this sets up a Diffie-Hellman exchange where both devices can decrypt the symmetric key and perform device-based encryption. Requires two configured devices, and you must run Generate Device Key on both, with the key type set to an EC Key.", "",
+                            "7. Remove Device - removes a device from the configured devices list"
+                            ],
+            message_afterlist="Press OK to continue",
+            buttons=["OK"]
+        )
+        info_dlg.show()
+
 
 def single_target_mode(target_path:pathlib.Path) -> None:
 
