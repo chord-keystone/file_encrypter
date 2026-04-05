@@ -43,6 +43,7 @@ from datetime import datetime
 from secrets import token_bytes
 from hashlib import sha256
 from time import time_ns
+from shutil import rmtree
 
 # ui imports:
 from ttkbootstrap.dialogs import Messagebox, QueryDialog
@@ -2099,7 +2100,7 @@ def single_target_mode(target_path:pathlib.Path) -> None:
     ttk.Label(master=root, text="Processing...").pack()
 
     # check if the file is already encrypted
-    if file_encrypter.is_encrypted(target_path):
+    if target_path.is_file() and file_encrypter.is_encrypted(target_path):
         
         action = file_encrypter.check_encryption_method(target_path)
 
@@ -2114,19 +2115,20 @@ def single_target_mode(target_path:pathlib.Path) -> None:
     else: # encrypt
         
         # if it wasn't ackshually encrypted and the extension is correct, then it's fishy
-        if (target_path.suffix == config.enc["file_extension"]) & (target_path.suffix != ''):
+        if target_path.is_file() & (target_path.suffix == config.enc["file_extension"]) & (target_path.suffix != ''):
             Messagebox.show_error("Detected mismatched file signature. Cannot decrypt this file using this program.")
             return
 
        # get devices:
         devices = list_all_devices()
-        
-        if devices:
-            serial_number = str(devices[0][0]._key[0])
 
-            if config.device["primary"]["serial_number"] == serial_number or \
-                config.device["secondary"]["serial_number"] == serial_number:
-                
+        # if there's a device, and configured devices:
+        if devices and len(config.device) > 0:
+
+            serial_number = str(devices[0][0]._key[0])
+            # the one instance of list comprehension in this entire project
+            if any([serial_number == v['serial_number'] for v in config.device.values()]):
+
                 dlg = ui_utils.ButtonOptionsDialog(
                     prompt="Configured Device found. Proceed with device, or switch to password?",
                     items=["Device", "Password"],
@@ -2161,22 +2163,25 @@ def single_target_mode(target_path:pathlib.Path) -> None:
                     for file in target_path.rglob("*"):
                         zipped.write(file, file.relative_to(target_path))
                                         
-                # remove original copy:
-                for file_or_folder in tuple(target_path.rglob("*"))[::-1]:
+                # remove original copies of files:
+                for file_or_folder in tuple(target_path.rglob("*")):
                     if file_or_folder.is_file():
                         file_encrypter.secure_destroy(file_or_folder)
-                    elif file_or_folder.is_dir():
-                        file_or_folder.rmdir()
-                target_path.rmdir()
+
+                # remove the folder:
+                rmtree(target_path)
 
                 # set target to the zipped file
-                target_path = str(zip_target)
+                target_path = zip_target
 
-            e = file_encrypter(
-                file_source=seq([target_path]),
-                action=action,
-                filename_obcuration=config.enc["filename_obscuration"]
-                )
+            try:
+                e = file_encrypter(
+                    file_source=seq((target_path,)),
+                    action=action,
+                    filename_obcuration=config.enc["filename_obscuration"]
+                    )
+            except Exception as e:
+                Messagebox.show_error(f"Could Not Encrypt: {e}", "Error")
             
 if __name__ == "__main__":
 
