@@ -61,10 +61,10 @@ def install_windows():
 
         # package dependencies
         print("Installing package dependencies...")
-        subprocess.check_call(f"{str(v_env_path / "Scripts" / "activate.bat")} && \
+        subprocess.check_call(f"\"{str(v_env_path / "Scripts" / "activate.bat")}\" && \
             python -m ensurepip --default-pip && \
             python -m pip install numpy && \
-            python -m pip install -r {str(installroot / "etc" / "dependencies.conf")}", shell=True)
+            python -m pip install -r \"{str(installroot / "etc" / "dependencies.conf")}\"", shell=True)
         
     except Exception as e:
         print(f"Error encountered while generating python dependencies: {e}. Rolling back installation")
