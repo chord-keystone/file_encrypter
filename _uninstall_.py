@@ -46,14 +46,8 @@ def main():
                 print(f"Reg. Key {v[-1]} not found: {e}")
 
     # remove the installation directory
-    for item in (temp_root_path:=pathlib.Path(config['root'])).rglob("*"):
-        if item.is_file() and item.name not in ("enc_config.json", "configured_devices.json", "encryption_list.txt"):
-            item.unlink()
-
-    for item in temp_root_path.glob("*"):
-        if item.is_dir() and item.name not in ("context"):
-            shutil.rmtree(item)
-
+    shutil.rmtree(config['root'])
+    
     print("Uninstall Complete. Encryption configuration files still remain just in case. You may close this terminal.")
 
 if __name__ == "__main__":

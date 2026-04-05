@@ -7,23 +7,25 @@ import yubikit.piv as piv
 
 etc_config = yaml.load((pathlib.Path(__file__).parent / "config.yml").open("r"), Loader=yaml.Loader)
 installroot = pathlib.Path(etc_config['root'])
+userpath = pathlib.Path(etc_config['user_path'])
 
 class config_loader:
     
     def __init__(self):
 
         try:
-            self.enc = dict_fromhex(ujson.load(open(installroot / "context" / "enc_config.json", "r")))
+            self.enc = dict_fromhex(ujson.load(open(userpath / "context" / "enc_config.json", "r")))
         except FileNotFoundError as e:
             raise FileNotFoundError("Encryption settings configuration file not found. Check installation.")
         
         try:
-            self.device = ujson.load(open(installroot / "context" / "configured_devices.json", "r"))
+            self.device = ujson.load(open(userpath / "context" / "configured_devices.json", "r"))
         except FileNotFoundError as e:
             raise FileNotFoundError("Supported devices configuration file not found. Check installation.")
 
         self.get_tempdir()
         self.installroot = installroot
+        self.userpath = userpath
 
         self.keytype_piv = {
                 "RSA2048": piv.KEY_TYPE.RSA2048,
@@ -50,14 +52,14 @@ class config_loader:
         
         self.enc.update(new_dict)
         
-        with open(installroot / "context" / "enc_config.json", 'r') as current_config:
+        with open(userpath / "context" / "enc_config.json", 'r') as current_config:
             current_dict = ujson.load(current_config)
 
         if set(self.enc.keys()) != set(current_dict.keys()):
             raise KeyError("The new configuration does not match the current configuration keys.")
         
         # overwrite file with new data:
-        with open(installroot / "context" / "enc_config.json", 'w') as config_file:
+        with open(userpath / "context" / "enc_config.json", 'w') as config_file:
             ujson.dump(self.enc, config_file, indent=4)
 
         self.__init__()
@@ -81,7 +83,7 @@ class config_loader:
         self.device[device_name].update(new_dict[device_name])
         
         # overwrite file with new data:
-        with open(installroot / "context" / "configured_devices.json", 'w') as config_file:
+        with open(userpath / "context" / "configured_devices.json", 'w') as config_file:
             ujson.dump(self.device, config_file, indent=4)
 
         self.__init__()
@@ -98,7 +100,7 @@ class config_loader:
             if set(value.keys()) != required_keys:
                 raise KeyError(f"The new configuration for device '{key}' does not match the template keys.")
 
-        with open(installroot / "context" / "configured_devices.json", 'w') as config_file:
+        with open(userpath / "context" / "configured_devices.json", 'w') as config_file:
             ujson.dump(self.device, config_file, indent=4)
 
         self.__init__()

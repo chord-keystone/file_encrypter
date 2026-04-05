@@ -39,6 +39,11 @@ def install_windows():
         for item in installroot.glob("*"):
             if item.is_dir() and item.name not in ("context"):
                 shutil.rmtree(item)
+
+    # make local user accessible path in AppData
+    userpath = pathlib.Path(os.getenv("APPDATA")) / "file_encrypter"
+    if not userpath.exists():
+        userpath.mkdir()
         
     # verify installation package, and unzip
     print("Verifying installation package...")
@@ -51,7 +56,7 @@ def install_windows():
             z.extractall(installroot)
     except Exception as e:
         print(f"Error unzipping: {e}")
-        return        
+        return
 
     # create venv at the install location
     print("Building python environment...")
@@ -86,14 +91,14 @@ def install_windows():
             context_menu_icon:=(installroot / "resources" / "icons8-data-matrix-code-48.png"),
             installroot / "resources" / "icons8-data-matrix-code-96.png"
         )):
-            assert file.is_file()
+            assert file.exists()
 
     except AssertionError as e:
         print(f"Error validating installation files: {e}")
         return
 
     # generate new files:
-    (config_devices_file:=(installroot / "context" / "configured_devices.json")).touch()
+    (config_devices_file:=(userpath / "context" / "configured_devices.json")).touch()
     with config_devices_file.open('r') as ff:
         temp_data = ff.read()
 
@@ -104,17 +109,17 @@ def install_windows():
 
     # two empty files:
     (installroot / "etc" / "config.yml").touch()
-    (installroot / "encryption_list.txt").touch()
+    (userpath / "encryption_list.txt").touch()
 
     # correct the naming for the encryption config file
-    enc_config_file = installroot / "context" / "enc_config.json"
+    enc_config_file = userpath / "context" / "enc_config.json"
     san_enc_config = installroot / "context" / "enc_config_san.json"
 
     # only replace if it doesn't exist:
     if not enc_config_file.exists():
 
-        san_enc_config.rename(enc_config_file)
-        
+        shutil.move(san_enc_config, enc_config_file)
+
         # set up a management salt:
         with enc_config_file.open('r') as file:
             enc_config_data = json.loads(file.read())
@@ -126,8 +131,13 @@ def install_windows():
         # if it exists, we don't need the copy.
         san_enc_config.unlink()
 
+    # move the context files to the user's path, now that it's all set up:
+    shutil.move(installroot / "context" / "supported_devices.json", userpath / "context" / "supported_devices.json")
+    (installroot / "context").rmdir()
+    
     # set up the /etc/yaml variables, which will be referenced by the program later
-    etc_vars = {"root":str(installroot)}
+    etc_vars = {"root":str(installroot), "user_path":str(userpath)}
+    
     with (installroot / "etc" / "config.yml").open('w') as config_stream:
             yaml.dump(etc_vars, config_stream, Dumper=yaml.Dumper)
 
@@ -141,7 +151,14 @@ def install_windows():
     
     try:
         # make the shortcut
-        shortcut = pyshortcuts.make_shortcut(str(py_exe_path) + " " + str(installroot / "file_encrypter.py -mnormal"), "File Encrypter", str(installroot), None, str(desktop_icon), str(desktop_path), None)
+        shortcut = pyshortcuts.make_shortcut(
+            script="\"" + str(installroot / "file_encrypter.py") + "\" -mnormal",
+            name="File Encrypter",
+            working_dir=str(installroot),
+            icon=str(desktop_icon), 
+            folder=str(desktop_path),
+            executable=str(py_exe_path),
+            startmenu=True)
 
         # rename without an underscore and save the link paths:
         temp_path = (desktop_path.absolute() / shortcut.name).with_suffix(".lnk")
@@ -175,10 +192,9 @@ def install_windows():
 
     # registry keys:
     try:
-
         command_string = f"\"{py_exe_path}\" \"{path_to_script}\" -mtarget -t\"%1\""
         
-        target_file_ext = json.load((installroot / "context" / "enc_config.json").open("r"))["file_extension"]["value"]
+        target_file_ext = json.load((userpath / "context" / "enc_config.json").open("r"))["file_extension"]["value"]
         file_ext_key_name = target_file_ext.lstrip(".").upper()
         
         # file extension association
@@ -208,7 +224,7 @@ def install_windows():
         reg_keys["dir_key"] = (winreg.HKEY_CLASSES_ROOT, f"Directory\\shell\\file_encrypter")
         dir_key = winreg.CreateKey(*reg_keys["dir_key"])
         winreg.SetValueEx(dir_key, "", 0, winreg.REG_SZ, "Encrypt/decrypt with File Encrypter")
-        winreg.SetValueEx(dir_key, "Icon", 0, winreg.REG_SZ, str(context_menu_icon))
+        winreg.SetValueEx(dir_key, "Icon", 0, winreg.REG_SZ, str(desktop_icon))
         winreg.CloseKey(dir_key)
 
         reg_keys["dir_command_key"] = (winreg.HKEY_CLASSES_ROOT, f"Directory\\shell\\file_encrypter\\command")
@@ -220,7 +236,7 @@ def install_windows():
         reg_keys["file_key"] = (winreg.HKEY_CLASSES_ROOT, f"*\\shell\\file_encrypter")
         file_key = winreg.CreateKey(*reg_keys["file_key"])
         winreg.SetValueEx(file_key, "", 0, winreg.REG_SZ, "Encrypt/decrypt with File Encrypter")
-        winreg.SetValueEx(file_key, "Icon", 0, winreg.REG_SZ, str(context_menu_icon))
+        winreg.SetValueEx(file_key, "Icon", 0, winreg.REG_SZ, str(desktop_icon))
         winreg.CloseKey(file_key)
 
         reg_keys["file_command_key"] = (winreg.HKEY_CLASSES_ROOT, f"*\\shell\\file_encrypter\\command")

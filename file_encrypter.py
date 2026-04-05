@@ -1369,10 +1369,10 @@ class device_interface:
             return
                 
         # remove the device:
-        with open(config.installroot / "context" / "configured_devices.json", 'r') as f:
+        with open(config.userpath / "context" / "configured_devices.json", 'r') as f:
             configured = ujson.load(f)
         del configured[list(config.device.keys())[dlg.result]]
-        with open(config.installroot / "context" / "configured_devices.json", 'w') as f:
+        with open(config.userpath / "context" / "configured_devices.json", 'w') as f:
             ujson.dump(configured, f, indent=4)
 
         Messagebox.show_info("Device removed from configuration.", title="Success")
@@ -1409,7 +1409,7 @@ class device_interface:
         if device.name != "unconfigured":
             raise ValueError("The available device is already configured.")
         
-        with open(config.installroot / "context" / "supported_devices.json", 'r') as f:
+        with open(config.userpath / "context" / "supported_devices.json", 'r') as f:
             supported_devices = ujson.load(f)
             
         if (pid_str:=hex(device.handle.pid.value)) not in supported_devices:
@@ -1620,7 +1620,7 @@ class uiroot(ttk.Window):
 
         # get the list of files to encrypt
         try:
-            self.file_list = utils.file_entry_manager(pathlib.Path(config.installroot) / "encryption_list.txt")
+            self.file_list = utils.file_entry_manager(config.userpath / "encryption_list.txt")
         except FileNotFoundError as e:
             ui_utils.ListMessageDialog.show_error(
                 e.full_message.before,
@@ -2004,10 +2004,10 @@ class uiroot(ttk.Window):
         # use a random 15 byte signature for obscuration
         mask = 0x7fdeacdef4961256c6db573f535c4b
 
-        with open(pathlib.Path(__file__).parent / "context" / "enc_config.json", "rb") as file:
+        with open(config.userpath / "context" / "enc_config.json", "rb") as file:
             enc_data = file.read()
 
-        with open(pathlib.Path(__file__).parent / "context" / "configured_devices.json", "rb") as file:
+        with open(config.userpath / "context" / "configured_devices.json", "rb") as file:
             devices_data = file.read()
 
         full_data_stream = int(len(enc_data)).to_bytes(4) + enc_data + int(len(devices_data)).to_bytes(4) + devices_data
@@ -2058,10 +2058,10 @@ class uiroot(ttk.Window):
         if conf_dlg.result != 0:
             return
 
-        with open(pathlib.Path(__file__).parent / "context" / "enc_config.json", "w") as file:
+        with open(config.userpath / "context" / "enc_config.json", "w") as file:
             ujson.dump(enc_dict, file, indent=4)
 
-        with open(pathlib.Path(__file__).parent / "context" / "configured_devices.json", "w") as file:
+        with open(config.userpath / "context" / "configured_devices.json", "w") as file:
             dev_dict.update(config.device)
             ujson.dump(dev_dict, file, indent=4)
 
