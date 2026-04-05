@@ -47,6 +47,7 @@ from time import time_ns
 # ui imports:
 from ttkbootstrap.dialogs import Messagebox, QueryDialog
 import ttkbootstrap as ttk
+from tkinter.filedialog import asksaveasfile, askopenfile
 
 # global instances:
 try:
@@ -1612,6 +1613,7 @@ class uiroot(ttk.Window):
 
         if hasattr(self, 'config_root') and self.busy_status():
             # skip the update loop if the user is in the config menu
+            self.config_root.lift()
             return
         
         self.refuse_to_encrypt = False
@@ -1904,7 +1906,7 @@ class uiroot(ttk.Window):
             self.config_root = ttk.Toplevel(self)
             self.config_root.title("Configuration Menu")
             self.config_root.geometry("400x600")
-            self.config_root.minsize(400, 600)
+            self.config_root.minsize(450, 600)
             self.config_root.columnconfigure(0, weight=1)
             self.config_root.columnconfigure(1, weight=1)
             self.config_root.rowconfigure(tuple(range(6)), weight=1)
@@ -1959,6 +1961,19 @@ class uiroot(ttk.Window):
             devrem_but.grid(row=row_id, column=0, columnspan=2, pady=10, padx=10, sticky="ew")
             row_id += 1
             
+            export_button = ttk.Button(self.config_root,
+                        text="Export Configuration", 
+                        command=self.export_config,
+                        bootstyle=("LIGHT", "OUTLINE"))
+            export_button.grid(row=row_id, column=0, columnspan=1, pady=10, padx=10, sticky="ew")
+            
+            import_button = ttk.Button(self.config_root,
+                        text="Import Configuration", 
+                        command=self.import_config,
+                        bootstyle=("LIGHT", "OUTLINE"))
+            import_button.grid(row=row_id, column=1, columnspan=1, pady=10, padx=10, sticky="ew")
+            row_id += 1
+
             # print some help for the user
             info_but = ttk.Button(self.config_root, 
                                   text="Info", 
@@ -1983,6 +1998,75 @@ class uiroot(ttk.Window):
             self.config_root.lift()
             self.busy()
 
+    @update_after
+    def export_config(self):
+
+        # use a random 15 byte signature for obscuration
+        mask = 0x7fdeacdef4961256c6db573f535c4b
+
+        with open(pathlib.Path(__file__).parent / "context" / "enc_config.json", "rb") as file:
+            enc_data = file.read()
+
+        with open(pathlib.Path(__file__).parent / "context" / "configured_devices.json", "rb") as file:
+            devices_data = file.read()
+
+        full_data_stream = int(len(enc_data)).to_bytes(4) + enc_data + int(len(devices_data)).to_bytes(4) + devices_data
+        full_data_stream = file_encrypter.mask_text(full_data_stream, mask.to_bytes(15))
+
+        with asksaveasfile(mode="wb", defaultextension=".cfgexp", initialfile="export") as file:
+            file.write(full_data_stream)
+
+        Messagebox.show_info("Export complete", "Info")
+        
+    @update_after
+    def import_config(self):
+        
+        mask = 0x7fdeacdef4961256c6db573f535c4b
+
+        with askopenfile(mode="rb", defaultextension=".cfgexp", initialfile="export") as file:
+            import_data = file.read()
+
+        import_data = file_encrypter.mask_text(import_data, mask.to_bytes(15))
+
+        try:
+            enc_data_len = int.from_bytes(import_data[:4])
+            enc_data = import_data[4:(pos:=4+enc_data_len)]
+            dev_data_len = int.from_bytes(import_data[pos:pos+4])
+            dev_data = import_data[pos+4:pos+4+dev_data_len]
+        except IndexError:
+            Messagebox.show_error("Incorrect file format for import.", "Error")
+            return
+
+        if pos+4+dev_data_len != len(import_data):
+            Messagebox.show_error("Incorrect file format for import.", "Error")
+            return
+        
+        try:
+            enc_dict = ujson.loads(enc_data)
+            dev_dict = ujson.loads(dev_data)
+        except ujson.JSONDecodeError:
+            Messagebox.show_error("Incorrect file format for import.", "Error")
+            return
+
+        conf_dlg = ui_utils.ButtonOptionsDialog(
+                prompt="Continue with importing file configurations? This will overwrite existing symmetric keys",
+                items=["Yes", "No"],
+                title="Confirm"
+            )
+        
+        conf_dlg.show(None, True)
+        if conf_dlg.result != 0:
+            return
+
+        with open(pathlib.Path(__file__).parent / "context" / "enc_config.json", "w") as file:
+            ujson.dump(enc_dict, file, indent=4)
+
+        with open(pathlib.Path(__file__).parent / "context" / "configured_devices.json", "w") as file:
+            dev_dict.update(config.device)
+            ujson.dump(dev_dict, file, indent=4)
+
+        config.__init__()
+            
     @staticmethod
     def print_config_information():
         info_dlg = ui_utils.ListedDialog(
@@ -1999,7 +2083,6 @@ class uiroot(ttk.Window):
             buttons=["OK"]
         )
         info_dlg.show()
-
 
 def single_target_mode(target_path:pathlib.Path) -> None:
 

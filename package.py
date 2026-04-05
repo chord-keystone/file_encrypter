@@ -1,7 +1,7 @@
 import zipfile, pathlib, subprocess, shutil
 from functional import seq
 
-VERSION_STRING = "1.0"
+VERSION_STRING = "1.1"
 
 def main():
 

@@ -23,10 +23,9 @@ def install_windows():
     import winreg # will need this shortly
 
     # set up destination install path
-    # prog_files_dir = pathlib.Path(getenv("ProgramFiles"))
+    prog_files_dir = pathlib.Path(os.getenv("ProgramFiles"))
     print("Setting default installation dir...")
-    prog_files_dir = pathlib.Path("C:/") / "Users" / "cason" / "Desktop" / "test"
-    
+        
     print("Checking installation folder...")
     installroot = prog_files_dir / "file_encrypter"
     if not installroot.is_dir():
@@ -250,4 +249,8 @@ def main():
             raise OSError("Only Windows is supported at this time") 
         
 if __name__ == "__main__":
-    main()
+    if (pathlib.Path(__file__).parent / ".git").exists():
+        # don't ever ever install to the git repo location. That'd be bad.
+        print("Cannot run uninstall script inside of repo.")
+    else:
+        main()
