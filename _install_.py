@@ -45,6 +45,10 @@ def install_windows():
     userpath = pathlib.Path(os.getenv("APPDATA")) / "file_encrypter"
     if not userpath.exists():
         userpath.mkdir()
+
+    user_context_dir = userpath / "context"
+    if not user_context_dir.exists():
+        user_context_dir.mkdir()
         
     # 'verify' installation package
     print("Verifying installation package...")

@@ -2,7 +2,7 @@ import zipfile, pathlib, subprocess, shutil
 from functional import seq
 # script that generates a distributable folder which installs the program (currently only on windows)
 
-VERSION_STRING = "1.3"
+VERSION_STRING = "1.3.1"
 
 def main():
 
