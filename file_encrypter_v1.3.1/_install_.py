@@ -1,4 +1,4 @@
-import platform, json, yaml, pathlib, venv, subprocess, pyshortcuts, os, shutil
+import platform, json, yaml, pathlib, venv, subprocess, os, shutil
 from secrets import token_bytes
 from zipfile import ZipFile
 
@@ -18,13 +18,15 @@ def install_windows():
     '''Procedural Windows program installation'''
 
     if not has_admin_windows():
-        input("Press enter to continue")
+
+        input("Setup requires Admin privilege. Please run again with Admin. Press enter to continue")
         return
 
     import winreg # will need this shortly
 
     # set up destination install path
     prog_files_dir = pathlib.Path(os.getenv("ProgramFiles"))
+    # prog_files_dir = pathlib.Path(os.getenv("USERPROFILE")) / "Desktop" / "test" #for testing
     print("Setting default installation dir...")
         
     print("Checking installation folder...")
@@ -154,38 +156,29 @@ def install_windows():
     # make shortcut(s):
     py_exe_path = installroot / ".venv" / "Scripts" / "pythonw.exe"
     path_to_script = installroot / "file_encrypter.py"
-    desktop_path = pathlib.Path("C:\\") / "Users" / os.getenv("USERNAME") / "Desktop"
+    desktop_path = pathlib.Path(os.getenv("USERPROFILE")) / "Desktop"
     
     try:
-        # make the shortcut
-        shortcut = pyshortcuts.make_shortcut(
-            script="\"" + str(installroot / "file_encrypter.py") + "\" -mnormal",
-            name="File Encrypter",
-            working_dir=str(installroot),
-            icon=str(desktop_icon), 
-            folder=str(desktop_path),
-            executable=str(py_exe_path),
-            startmenu=True)
 
-        # rename without an underscore and save the link paths:
-        temp_path = (desktop_path.absolute() / shortcut.name).with_suffix(".lnk")
-        desktop_shortcut_file_name=str(temp_path).replace("File_Encrypter", "File Encrypter")
-        if not pathlib.Path(desktop_shortcut_file_name).exists():
-            temp_path.rename(desktop_shortcut_file_name)
-        else:
-            # if it already exists, just replace it
-            pathlib.Path(desktop_shortcut_file_name).unlink()
-            temp_path.rename(desktop_shortcut_file_name)
+        desktop_shortcut_file_name = desktop_path / "File Encrypter.lnk"
+        make_obj_command = f"$s=(New-Object -COM WScript.Shell).CreateShortcut('{str(desktop_shortcut_file_name)}');"
+        set_path_command = f"$s.TargetPath='\"{str(py_exe_path)}\"'"
+        set_args_command = f"$s.Arguments='\"{str(installroot / "file_encrypter.py")}\" -mnormal'"
+        set_icon_command = f"$s.IconLocation='{str(desktop_icon)}'"
+        save_command = "$s.save()"
 
-        temp_path = (pathlib.Path(shortcut.startmenu_dir) / shortcut.name).with_suffix(".lnk")
-        start_menu_shortcut_file_name = str(temp_path).replace("File_Encrypter", "File Encrypter")
+        # make desktop shortcut
+        output = subprocess.run(["powershell.exe", ";".join((make_obj_command, set_path_command, set_args_command, set_icon_command, save_command))], capture_output=True)
+        if output.returncode != 0:
+            raise SyntaxError(output.stderr)
 
-        if not pathlib.Path(start_menu_shortcut_file_name).exists():
-            temp_path.rename(start_menu_shortcut_file_name)
-        else:
-            pathlib.Path(start_menu_shortcut_file_name).unlink()
-            temp_path.rename(start_menu_shortcut_file_name)
-
+        # make start menu shortcut
+        start_menu_shortcut_file_name = pathlib.Path(os.getenv("APPDATA")) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "File Encrypter.lnk"
+        make_obj_command = f"$s=(New-Object -COM WScript.Shell).CreateShortcut('{str(start_menu_shortcut_file_name)}');"
+        output = subprocess.run(["powershell.exe", ";".join((make_obj_command, set_path_command, set_args_command, set_icon_command, save_command))], capture_output=True)
+        if output.returncode != 0:
+            raise SyntaxError(output.stderr)        
+        
     except Exception as e:
         print(f"Could not generate shortcut: {e}")
         
