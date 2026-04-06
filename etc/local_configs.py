@@ -120,7 +120,7 @@ class config_loader:
         self.device.update(new_dict)
 
         # this time the keys are set in stone and defined here:
-        required_keys = {"name", "model", "description", "seriasl_number", "firmware_version", "management_key", "public_key", "key_type"}
+        required_keys = {"name", "model", "description", "serial_number", "firmware_version", "management_key", "public_key", "key_type"}
 
         # validate that they match up
         for key, value in new_dict.items():
