@@ -1,9 +1,11 @@
 from tonellishanks import tonellishanks
-from struct import pack, unpack
 # very basic elliptic curve cryptography calculations
+# credit: ECPy <cedric.mesnil@ubinity.com> - I did not figure out all of this math!
+# See also: https://ec-python.readthedocs.io/en/latest/#overview
 
 class ec_curve:
-    a:int = 530438
+
+    a:int = 0x81806
     p:int = 0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff45
 
     def __init__(self, a:int=None, p:int=None):
@@ -13,6 +15,8 @@ class ec_curve:
             self.p = p
 
 class ec_point(ec_curve):
+# class to handle EC operations
+
     x:int
     y:int
 
@@ -32,7 +36,7 @@ class ec_point(ec_curve):
             self.y = y #bold assumption
 
     def __add__(self, Q):
-
+    
         xslope = pow((Q.x - self.x)%self.p, self.p-2, self.p)
         xslope_squared = pow(((Q.x - self.x)*(Q.x - self.x))%self.p, self.p-2, self.p)
         xslope_cubed = pow(((Q.x - self.x)*(Q.x - self.x)*(Q.x - self.x))%self.p, self.p-2, self.p)
@@ -43,7 +47,7 @@ class ec_point(ec_curve):
         return ec_point(x3, y3)
     
     def point_multiply(self, k:int, P):
-        
+            
         k = bin(k)
         k = k[2:]
         sz = len(k)
@@ -117,3 +121,6 @@ class ec_point(ec_curve):
         z  = (v1*zq)         %p
 
         return (x,y,z)
+
+if __name__ == "__main__":
+    pass

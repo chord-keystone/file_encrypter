@@ -14,6 +14,8 @@ from itertools import cycle
 from PIL import Image, ImageTk, ImageSequence
 
 class ListedDialog(Dialog):
+    '''Dialog subclass that organizes messages into a preamble, a scrollable list-type message, and a post-amble'''
+    # lots of this taken from the other ttkbootstrap Dialog overloads
 
     def __init__(
         self,
@@ -53,6 +55,7 @@ class ListedDialog(Dialog):
 
     def create_body(self, master):
         """Overrides the parent method; adds the message section."""
+
         container = ttk.Frame(master, padding=self._padding)
         if self._icon:
             try:
@@ -70,6 +73,7 @@ class ListedDialog(Dialog):
                     # icon is neither data nor a valid file path
                     print("MessageDialog icon is invalid")
 
+        # parse the message components:
         if self._msg_before:
             for msg in self._msg_before.split("\n"):
                 message = "\n".join(textwrap.wrap(msg, width=self._width))
@@ -77,6 +81,7 @@ class ListedDialog(Dialog):
                 message_label.pack(pady=(0, 3), fill=X, anchor=N)
 
         if self._list_msg:
+            # scrollable message in the middle for the list:
             scrollist = ScrolledText(master=container, wrap=WORD, width=self._width, height=10)
             for ele in self._list_msg:
                 scrollist.insert(INSERT, str(ele) + "\n")
@@ -158,6 +163,8 @@ class ListedDialog(Dialog):
         super().show(position)
 
 class ListMessageDialog:
+    '''A class of static methods that set up a ListedDialog object'''
+    # see also: MessageBox class in ttkbootstrap
 
     @staticmethod
     def show_info(message_before:str="", list_msg:list[str] = [""], message_after:str="", title=" ", parent=None, alert=False, **kwargs):
@@ -223,6 +230,7 @@ class ListMessageDialog:
         dlg.show(position)
 
 class PasswordQueryDialog(QueryDialog):
+    '''Class for querying a password'''
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -260,12 +268,14 @@ class PasswordQueryDialog(QueryDialog):
         self._initial_focus = self.entry[0]
 
     def validate(self):
+        '''Validation function for password matching'''
         if self.entry[0].get() != self.entry[1].get():
             self._pwlabel.config(text="Passwords do not match.", foreground="red")
             self.entry[0].config(foreground="red")
             self.entry[1].config(foreground="red")
             return False
         elif len(self.entry[0].get()) < 10:
+            # we like strong passwords here
             self._pwlabel.config(text="Password must be at least 10 characters.", foreground="red")
             self.entry[0].config(foreground="red")
             return False
@@ -374,6 +384,7 @@ class ButtonOptionsDialog(Dialog):
         self._toplevel.destroy()
 
 class AnimatedGif(ttk.Frame):
+    '''Class that runs an animated GIF. Set up the gif by calling the constructor, and increment frames by calling next_frame.'''
 
     def __init__(self, master, file_path, text_input=None):
         super().__init__(master, width=300, height=200)
@@ -402,12 +413,13 @@ class AnimatedGif(ttk.Frame):
         self.after(self.framerate, self.next_frame)
 
 class FileView(ttk.Toplevel, object):
+    '''ttk.Toplevel, notebook-esque file viewer UI class for viewing file trees in the file encryption list.'''
     
     _instance = None
     _already_init = False
     file_list_handle:file_entry_manager
 
-    # singleton
+    # singleton class implementation:
     def __new__(cls, *args, **kwargs):
 
         if cls._instance is None or not cls._instance.winfo_exists():
@@ -418,8 +430,13 @@ class FileView(ttk.Toplevel, object):
         
         return cls._instance
 
-    def __init__(self, master=None, flist:file_entry_manager=None, run_when_done=None):
+    def __init__(self, master=None, flist:file_entry_manager=None):
+        '''ttk.Treeview 'notebook'-esque file viewer UI class for viewing file trees in the file encryption list.
+        
+        :param file_entry_manager flist: File list manager object containing the files you'd like to display
+        '''
 
+        # it's a singleton - if it already exists, just reopen it:
         if self._already_init:
             return
         else:
@@ -428,27 +445,30 @@ class FileView(ttk.Toplevel, object):
         if flist is None:
             ValueError("Missing required argument flist")
 
-        self.event = run_when_done
-
+        # start the toplevel:
         ttk.Toplevel.__init__(self, master)
         self.title("File List")
         self.geometry("800x500")
         self.file_list_handle = flist
         
+        # with a treeview inside of it:
         self.tv = ttk.Treeview(master=self, selectmode="browse", style="secondary")
         yscroll = ttk.Scrollbar(master=self, orient="vertical", command=self.tv.yview)
         xscroll = ttk.Scrollbar(master=self, orient='horizontal', command=self.tv.xview)
         self.tv.config(xscroll=xscroll.set, yscroll=yscroll.set)
         self.tv.heading("#0", text="Active Files", anchor="w")
 
+        # display the file entries:
         self.init_base_entries()
 
+        # ui elements:
         adddirbutton = ttk.Button(master=self, text="Add Folder", command=self.dir_add, bootstyle="LIGHT")
         rmbutton = ttk.Button(master=self, text="Remove", command=self.remove, bootstyle="DANGER")
         okbutton = ttk.Button(master=self, text="OK", command=self.destroy, bootstyle="LIGHT")
         openbutton = ttk.Button(master=self, text="Open", command=self.open, bootstyle="SECONDARY")
         self.tv.bind("<Double-r>", self.open)
 
+        # positions:
         self.grid()
         self.tv.grid(row=0, column=0, sticky='nsew', columnspan=4)
         xscroll.grid(row=1, column=0, sticky='ew')
@@ -463,6 +483,8 @@ class FileView(ttk.Toplevel, object):
         self.grid_rowconfigure(0, weight=1)
 
     def open(self) -> None:
+        # calls startfile on the selected item
+
         selected = self.tv.selection()
         item_text = pathlib.Path(self.tv.item(selected)["text"])
 
@@ -474,7 +496,6 @@ class FileView(ttk.Toplevel, object):
         startfile(item_text)
         
     def destroy(self) -> any:
-        if self.event is not None: self.event()
         self._already_init = False
         self._instance = None
         super().destroy()
@@ -485,13 +506,14 @@ class FileView(ttk.Toplevel, object):
         existing_items = self.tv.get_children()
         self.tv.delete(*existing_items)
 
-        # add in the contents
+        # add in the contents form the file entry manager
         for item in self.file_list_handle.base_entries:
             inserted = self.tv.insert("", "end", text=item, open=True)
             if item.is_dir():
                 self.tree_add(inserted, item)
 
     def tree_add(self, item:pathlib.Path, parent:pathlib.Path) -> None:
+        # recursively adds dir entries with indentation to the treeview object
 
         for subitem in parent.iterdir():
             this_inserted = self.tv.insert(item, 'end', text=subitem, open=False, tags=item)
@@ -499,10 +521,12 @@ class FileView(ttk.Toplevel, object):
                 self.tree_add(this_inserted, subitem)
                                 
     def dir_add(self):
+        # button function call for adding a directory to the file list
         
         get_dir = askdirectory()
         if get_dir:
             try:
+                # add the dir to the file list:
                 self.file_list_handle.add_item(pathlib.Path(get_dir))
             except Exception as e:
                 if hasattr(e, "full_message"):
@@ -519,6 +543,7 @@ class FileView(ttk.Toplevel, object):
         self.focus()
 
     def remove(self):
+        # remove button call:
 
         selection = self.tv.selection()
         text_selection = pathlib.Path(self.tv.item(selection)["text"])
@@ -528,6 +553,7 @@ class FileView(ttk.Toplevel, object):
         self.init_base_entries()
 
 def main():
+    # nothing to see here
     pass
 
 if __name__ == "__main__":

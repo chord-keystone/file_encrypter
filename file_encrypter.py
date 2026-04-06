@@ -1,3 +1,20 @@
+# file_encrypter
+# Author: Nathan (chord-keystone on GitHub)
+# Project Start: approximately June 2025
+# Vision:
+# - allow users to encrypt files/folders using Yubikeys for heightened security.
+# - provide a fast, light, and highly secure file enryption platform.
+# - minimize detectability, maximize the amount of time/effort it would take to figure out how to decode even the file metadata.
+# Features:
+# - file name obscuration (which is actually just encryption)
+# - ChaCha20 symmetric encryption as the baseline
+# - Various asymmetric approaches available to wrap the symmetric keys, including Yubikey-stored private keys.
+# - Dual-yubikey mode, which uses Diffie-Hellman to encrypt a symemtric key such that two configured Yubikeys may unencrypt the same file.
+# - paranoid_random module, which uses audio recordings to generate random numbers for new symmetric key generation.
+# - password encryption support (passwords are hashed before use as symmetric keys)
+# - secure (password-symmetric encryption) storage of yubikey management passwords
+# - file header/metadata is heavily obscured, and padded to random lengths between 1-64 kB to throw off statistal inference.
+
 # full imports:
 import ujson, threading, pathlib
 
@@ -48,14 +65,15 @@ from shutil import rmtree
 # ui imports:
 from ttkbootstrap.dialogs import Messagebox, QueryDialog
 import ttkbootstrap as ttk
-from tkinter.filedialog import asksaveasfile, askopenfile
+from tkinter.filedialog import asksaveasfile, askopenfilename
 
-# global instances:
+# init config handler:
 try:
     config = cfg.config_loader()
 except FileNotFoundError as e:
     Messagebox.show_error(e.strerror, "Error")
 
+# globals:
 FILE_BUFFER_MAX = 2**31-1
 MAX_PATH = 255
 PAD_TGT = 125
@@ -63,11 +81,13 @@ GRAIN_ENCRYPTION = 180
 FIRST_BYTES_LEN = len(config.enc['signature_device'])
 MAX_HEADER = 390 + 2**16 + FIRST_BYTES_LEN
 
+# file signatures:
 SIG_DEV = config.enc['signature_device']
 SIG_PWD = config.enc['signature_password']
 
 @dataclass
 class compatible_device:
+    # class to organize compatible yubikey devices
     name: str
     serial_number: str
     handle: _UsbCompositeDevice
@@ -75,6 +95,7 @@ class compatible_device:
 
 @dataclass
 class split_exception_msg:
+    # class to organize long exception text into a preamble, list of items, and conclusion.
     before:str
     msglist:list[str]
     after:str
@@ -86,7 +107,7 @@ class encrypt_action(Enum):
     decrypt_device = 3
 
 class file_encrypter:
-
+    
     _mutex = Lock()
     
     def __init__(self, 
@@ -102,11 +123,13 @@ class file_encrypter:
             :param cached_pin: cached PIN for device authentication
         """
         
+        # source must be a seq
         if not isinstance(file_source, Sequence) or not file_source:
             raise ValueError("File source must be a non-empty seq of file paths.")
         elif not file_source.map(lambda x: isinstance(x, pathlib.Path)).all():
             raise TypeError("File source must be a list of strings (of paths).")
         
+        # setup some actions into a dict:
         _action_map = {
             encrypt_action.encrypt_device: self._symmetric_encrypt,
             encrypt_action.encrypt_password: self._symmetric_encrypt, 
@@ -121,19 +144,23 @@ class file_encrypter:
                 encrypt_action.decrypt_password : f"Decrypted {file_source.len()} files.",
         }
         
+        # initializations:
         self.header = {}
         self.returned_files = []
         self.cached_pin = cached_pin
         self.filename_obscuration = filename_obcuration
 
+        # start the file header with some basic info:
         self.header.update({
             "symmetric_type": config.enc["symmetric_type"],
             "symmetric_kdf": config.enc["symmetric_kdf"],
             "checksum_value": config.enc["checksum_value"]})
         
+        # determine if we need parallel/batch encrypt
         using_pool : bool = (n_pool:= file_source.len()//GRAIN_ENCRYPTION + 1) > 1
         using_pbar : bool = file_source.len() > 5
 
+        # if so, start a SyncManager and some properties for tracking:
         if using_pool:
             _manager = Manager()
             _returned_list : ListProxy = _manager.list()
@@ -146,24 +173,28 @@ class file_encrypter:
 
         # if using parallelism, include the progress ui:
         if using_pbar:
-            pbar_container = ttk.Toplevel("Progress", size=(600, 160))
-            pbar = ttk.Progressbar(pbar_container, value=0, maximum=file_source.len(), length=550, bootstyle="info-striped", mode="determinate")
-            pbar.grid(column=0, row=0, columnspan=2, padx=10, pady=10)
-            plabel = ttk.Label(pbar_container, text="Encrypting...", wraplength=550)
+            progress_bar_container = ttk.Toplevel("Progress", size=(600, 160))
+            progress_bar = ttk.Progressbar(progress_bar_container, value=0, maximum=file_source.len(), length=550, bootstyle="info-striped", mode="determinate")
+            progress_bar.grid(column=0, row=0, columnspan=2, padx=10, pady=10)
+            plabel = ttk.Label(progress_bar_container, text="Encrypting...", wraplength=550)
             if action in (encrypt_action.decrypt_device, encrypt_action.decrypt_password):
                 plabel['text'] = "Decrypting..."
             plabel.grid(column=0, row=1, columnspan=2, sticky='w')
-            pbar_container.withdraw()
+            progress_bar_container.withdraw()
         
         def error_callback_fcn(e:BaseException):
             print(f"Error: {str(e)}")
 
+        # action gateway"
         match action:
 
             case encrypt_action.encrypt_password:
 
+                # metadata:
                 self.head_first_bytes = config.enc["signature_password"]
                 self.header["method"] = "password"
+
+                # get a password:
                 if len(self.cached_pin) != 0:
                     password = self.cached_pin
                 else:
@@ -175,7 +206,8 @@ class file_encrypter:
                 _symm_key = password.encode()
 
             case encrypt_action.decrypt_password:
-                
+
+                # grab the password:
                 try:
                     password = self.get_password(action)
                     self.cached_pin = password
@@ -186,8 +218,11 @@ class file_encrypter:
                 
             case encrypt_action.encrypt_device:
 
+                # metadata:
                 self.head_first_bytes = config.enc["signature_device"]
                 self.header["method"] = "device"
+
+                # assymetric type gateway:
                 match config.rsa_or_ec:
                    
                     case "rsa":
@@ -250,7 +285,10 @@ class file_encrypter:
                             Messagebox.show_error(f"Device is unconfigured. Run Configuration first: {a}", title="Error")
                             return
 
-        if using_pbar: pbar_container.deiconify()
+        # progress bar:
+        if using_pbar: progress_bar_container.deiconify()
+
+        # parallel encrypt:
         if using_pool:
 
             pool = Pool( max(min(n_pool, cpu_count() - 2), 2))
@@ -264,32 +302,34 @@ class file_encrypter:
                 chunksize=GRAIN_ENCRYPTION, 
                 error_callback=error_callback_fcn
             )
-                
+
+            # periodically update the progress bar
             while not result.ready():
                 with self._mutex:
-                    pbar['value'] = counter.value
+                    progress_bar['value'] = counter.value
                 # plabel['text'] = file
-                pbar_container.update()
-                pbar_container.lift()
+                progress_bar_container.update()
+                progress_bar_container.lift()
                 sleep(0.2)
 
             pool.close()
             pool.join()
 
         else:
+            # sequential encryption:
             for ff in file_source:
                 _action_map[action](ff, raw_key=_symm_key, _tracking=(_returned_list, counter))
                 if using_pbar:
-                    pbar['value'] += 1
+                    progress_bar['value'] += 1
                     # plabel['text'] = file
-                    pbar_container.update()
-                    pbar_container.lift()
+                    progress_bar_container.update()
+                    progress_bar_container.lift()
 
         # print the success messagebox if we got this far.
         Messagebox.show_info(_print_success_map[action], title="Complete")
 
         # cleanup:
-        if using_pbar: pbar_container.destroy()
+        if using_pbar: progress_bar_container.destroy()
         self.header = token_bytes(getsizeof(self.header))  # destroy the header
         self.returned_files = list(_returned_list) # update the returned file list
         
@@ -297,7 +337,11 @@ class file_encrypter:
         """ Heavy hitting symmetric encryption function.
             Encrypts the input file with ChaCha20-Poly1305 AEAD encryption, given a secure key.
             Exports the header into the associated authenticated data in the encryption stream for data integrity.
-            :param file: the file to encrypt
+
+            :param pathlib.Path file: the file to encrypt
+            :param bytes raw_key: raw symmetric key
+            :param _tracking: Tracking lists
+            
         """
 
         this_header = {}
@@ -307,12 +351,14 @@ class file_encrypter:
         this_salt = token_bytes(32)
         this_header["salt"] = this_salt.hex()
         
+        # key extension
         _skey = HKDF(
             algorithm=hashes.SHA256(),
             length=32,
             salt=this_salt,
             info=None).derive(raw_key)
 
+        # collect nonce and some other metadata
         nonce = token_bytes(12+16)
         this_header["nonce"] = nonce.hex() #Nonce goes into the header
         this_header["extension"] = file.suffix
@@ -321,7 +367,7 @@ class file_encrypter:
         file_stat = file.stat()
         this_header["time_attrs"] = (file_stat.st_ctime_ns, file_stat.st_mtime_ns)
         
-        # get the header:
+        # dump out the header:
         head = ujson.dumps(this_header).encode('utf-8')
 
         # mask the head up to this point (used in the checksum for chacha20-poly1305):
@@ -349,12 +395,13 @@ class file_encrypter:
                 # the filename is longer than the minimuim padding target, so we use the original file name
                 padded_filename = filename_plaintext #the file already exists if it got to this point, so the path cannot be too long.
 
-            fname_enc = Cipher(
+            
+            file_name_encrypter = Cipher(
                 algorithm=algorithms.Camellia(_skey),
                 mode=modes.OFB(nonce[12:])
                 ).encryptor()
             
-            filename_ciphertext = fname_enc.update(padded_filename) + fname_enc.finalize()
+            filename_ciphertext = file_name_encrypter.update(padded_filename) + file_name_encrypter.finalize()
             urlsafe_filename = urlsafe_b64encode(filename_ciphertext).decode("utf-8")
             new_file = file.parent / urlsafe_filename
 
@@ -370,7 +417,7 @@ class file_encrypter:
             if isinstance(_tracking[1], ValueProxy):
                 _tracking[1].value += 1
 
-        # write the encrypted file:
+        # write the encrypted file, in up to 2 GB chunks:
         with open(new_file, 'wb') as f_new:
             f_new.write(self.head_first_bytes) # specifies device vs password encryption
             f_new.write(h_obs['signature'])
@@ -413,7 +460,10 @@ class file_encrypter:
         """ Symmetric decryption function.
             Decrypts the input file with ChaCha20-Poly1305 AEAD encryption, given a secure key in raw_key.
             Reads the file header to get the nonce, salt, etc, authenticates the header, and decrypts the file.
-            :param file: the file to decrypt
+
+            :param pathlib.Path file: the file to decrypt
+            :param raw_key bytes: raw key
+            :param _tracking: tracking lists
         """
 
         # read the header:
@@ -503,9 +553,11 @@ class file_encrypter:
     def _asymmetryc_decrypt(self, skey_base:bytes) -> bytes:
         """ Decrypts symmetric key using the private key on the device.
             Returns the decrypted symmetric key.
-            :param skey_base: the wrapped symmetric key to decrypt
+
+            :param bytes skey_base: the wrapped symmetric key to decrypt
         """
 
+        # connect to device:
         try:
             device = device_interface.get_device()
         except ConnectionError as c:
@@ -597,7 +649,7 @@ class file_encrypter:
         
     @staticmethod
     def secure_destroy(file:pathlib.Path) -> None:
-        """ Triple pass overwrite """
+        """ Triple pass overwrite file destruction """
 
         with file.open('r+b') as f:
 
@@ -635,6 +687,7 @@ class file_encrypter:
                 this_buffer_length = len(file_contents)
                 this_pos=f.tell()
                 
+                # pseudorandom bytes from AES:
                 seed = token_bytes(32)
                 enc = aead.AESSIV(seed)
                 random_bytes = enc.encrypt(0x00.to_bytes()*this_buffer_length, None)
@@ -644,14 +697,18 @@ class file_encrypter:
                 f.write(random_bytes)
                 f.seek(this_pos + this_buffer_length, 0)
 
-        file.unlink()  # Remove the scrambled file
+        file.unlink()  # Remove the butchered file
 
     @staticmethod
     def read_header(file:pathlib.Path) -> dict:
+        '''Reads file header into a dict.
         
+            :param pathlib.Path file: input file
+        '''
+
         with file.open('rb') as f:
 
-            file_data = f.read(MAX_HEADER)
+            file_data = f.read(MAX_HEADER) #hey at least it's constant time now
             file_data = file_data[FIRST_BYTES_LEN:] # skip the device/pwd signatures
             deobscured_head = head_obscuration().read_head(file_data)
             
@@ -685,13 +742,24 @@ class file_encrypter:
 
     @staticmethod
     def mask_text(plaintext:bytes, mask:bytes) -> bytes:
+            '''Masks plain text in bytes with a mask. Achieves Obscuration, NOT encryption.
+            
+                :param bytes plaintext:
+                :param bytes mask:
+            '''
+            
             # mask the header with the key
-            sized_mask = mask * ceil(len(plaintext) / len(mask))
-            sized_mask = sized_mask[:len(plaintext)]
+            sized_mask = mask * ceil(len(plaintext) / len(mask)) #extend
+            sized_mask = sized_mask[:len(plaintext)] #extend correctly
             return file_encrypter.simple_encrypt(plaintext, sized_mask)
     
     @staticmethod
     def simple_encrypt(plaintext:bytes, full_cipher:bytes) -> bytes:
+        '''Encryption via simple xor. Is as secure as your key.
+        
+            :param bytes plaintext:
+            :param bytes full_cipher: the encryption 'cipher', a byte string as long as the plaintext.
+        '''
         
         if len(plaintext) != len(full_cipher):
             raise ValueError("Key must be the same length as the plaintext.")
@@ -720,6 +788,10 @@ class file_encrypter:
                     
     @staticmethod
     def get_password(action:encrypt_action) -> str:
+        '''Get Password - generates a dialog for user to enter passwords
+        
+            :param encrypt_action action:
+        '''
 
         if action == encrypt_action.encrypt_password:
             dlg = ui_utils.PasswordQueryDialog(
@@ -747,7 +819,9 @@ class device_interface:
     """
     @staticmethod
     def update_management_password() -> None:
+        '''Update or first-time enter a device management password.'''
 
+        # if there's already a password in there:
         if len(config.enc["management_auth"]) > 0:
             
             # get current pw:
@@ -771,21 +845,24 @@ class device_interface:
                 Messagebox.show_error("Invalid management password. Exiting Program.", title="Error")
                 raise SystemExit
             
+            # decrypt the management keys:
             management_encryptor = HKDF(
-            algorithm=hashes.SHA256(),
-            length=24,
-            salt=config.enc["management_auth"],
-            info=None).derive(old_pw.encode())
+                algorithm=hashes.SHA256(),
+                length=24,
+                salt=config.enc["management_auth"],
+                info=None).derive(old_pw.encode())
 
             unwrapped_mgmt_keys = {}
             for name, info in config.device.items():
                 unwrapped_mgmt_keys[name] = file_encrypter.simple_encrypt(bytes.fromhex(info["management_key"]), management_encryptor)
 
+            # get a new pasword:
             try:
                 new_pw = file_encrypter.get_password(encrypt_action.encrypt_password)
             except ValueError:
                 return
             
+            # calculate and save the hash:
             new_deriver = Argon2id(
                 memory_cost=64*1024,
                 iterations=3,
@@ -798,6 +875,7 @@ class device_interface:
             config.update_enc({"management_auth": new_hash.hex()})
             config.update_enc({"man_salt": new_salt.hex()})
 
+            # encrypt the man. keys again using the new password
             new_management_encryptor = HKDF(
                 algorithm=hashes.SHA256(),
                 length=24,
@@ -807,6 +885,7 @@ class device_interface:
             for name in config.device.keys():
                 config.update_device_parameter({name: {"management_key": file_encrypter.simple_encrypt(unwrapped_mgmt_keys[name], new_management_encryptor).hex()}})
 
+            # all done =)
             Messagebox.show_info("Management password updated.", title="Success")
 
         else: 
@@ -836,7 +915,9 @@ class device_interface:
            
     @staticmethod
     def management_authenticate() -> dict[str, bytes]:
+        '''Prompts user to authenticate using the management password. Returns the unencrypted device management keys.'''
 
+        # get the password:
         pwgetter = QueryDialog(
             prompt="Enter Management Password",
             title="Management Authentication"
@@ -844,10 +925,12 @@ class device_interface:
         pwgetter.show(None, True)
         if not pwgetter.result:
             Messagebox.show_error("No password entered. Exiting Program.", title="Error")
+            # destroy the user if they're wrong
             raise SystemExit
         
         password = pwgetter.result
         
+        # verify the password:
         key = Argon2id(
             memory_cost=64*1024,
             iterations=3,
@@ -859,8 +942,10 @@ class device_interface:
             key.verify(password.encode(), config.enc["management_auth"])
         except InvalidKey as e:
             Messagebox.show_error("Invalid management password. Exiting Program.", title="Error")
+            # once again, destroy the user if they didn't enter the correct password.
             raise SystemExit
         
+        # decrypt the management keys:
         management_encryptor = HKDF(
             algorithm=hashes.SHA256(),
             length=24,
@@ -874,6 +959,7 @@ class device_interface:
             .map(lambda x: (x[0], file_encrypter.simple_encrypt(x[1], management_encryptor)))
         ).to_dict()
 
+        # and the password!
         unwrapped_keys["password"] = password.encode()
         
         return unwrapped_keys
@@ -883,15 +969,21 @@ class device_interface:
         """ Gets the connected devices, cross references with the config file. If multiple are found, 
             prompts the user to select one.
             Returns a compatible device dataclass or a list of compatible devices.
+
+            :param bool include_unconfigured:
+            :param bool prompt:
         """
 
+        # grab all devices:
         device_list = seq(list_all_devices())
 
         if not device_list:
             raise ConnectionError("No devices found. Please connect a valid device.")
         
+        # get S/Nos
         connected_serials = device_list.map(lambda x: (str(x[1].serial), (x[0], x[1])))
 
+        # names
         configured_names = seq(config.device.keys()).enumerate()
         configured_serials = seq(config.device.values()).\
             enumerate().\
@@ -899,6 +991,7 @@ class device_interface:
             join(configured_names).\
             map(lambda x: x[1])
         
+        # cross-check the configured with connected devices:
         connected_configured = configured_serials.join(connected_serials, "inner")
         connected_unconfigured = configured_serials.join(connected_serials, "outer").\
             filter(lambda x: x[1][0] is None)
@@ -907,6 +1000,7 @@ class device_interface:
         if not connected_serials:
             raise ConnectionError("No devices found. Please connect a valid device.")
 
+        # cover every single combination device configured state and connected state and prompting user
         if not include_unconfigured:
             
             if not connected_configured:
@@ -1060,8 +1154,11 @@ class device_interface:
     @staticmethod
     def pin_authenticate(session:piv.PivSession, cachepin:str = "") -> str:
         """ PIN Authentication for the user given an open PIV session
-            :param session: open PIV session
+
+            :param piv.PivSession session: open PIV session
+            :param str cachepin: a cached pin that may be re-used
         """ 
+        # prompt user to input PIN
         if not cachepin:
             pin_getter = QueryDialog(
                 prompt="Enter PIN",
@@ -1073,15 +1170,17 @@ class device_interface:
             else:
                 userpin = pin_getter.result
         else:
+            # or just use the cachepin
             userpin = cachepin
 
+        # authenticate on the device using the PIN:
         pin_auth = False
         while not pin_auth:
             try:
                 session.verify_pin(userpin)
                 pin_auth = True
             except yubikit.core.InvalidPinError as e:
-                # wrong pin
+                # wrong pin case
                 if e.attempts_remaining > 0:
                     
                     pin_getter = QueryDialog(
@@ -1096,8 +1195,11 @@ class device_interface:
                         userpin = pin_getter.result
 
                 else:
+
+                    # too many incorrect tries will lock the PIN.
                     Messagebox.show_error("PIN is locked. Unlock in Authenticator App.", title="Error")
                     raise SystemExit
+                
             except CardConnectionException as e:
                 # card was disconnected
                 raise CardConnectionException("Card disconnected during authentication.")
@@ -1106,7 +1208,12 @@ class device_interface:
 
     @staticmethod
     def new_single_symmetric_key(unprompted:bool=False) -> None:
+        '''Generates a new symmetric key for asymmetric wrapping by the configured device.
         
+            :param bool unprompted: Skip past the warning dialogs/authentication
+        '''
+
+        # grab some random numbers:
         rng = paranoid_random.paranoid_random(256)
 
         if not unprompted:
@@ -1132,6 +1239,7 @@ class device_interface:
             # authenticate
             device_interface.management_authenticate()
 
+        # asymmetric type gateway. lots of conditional logic in here:
         match config.rsa_or_ec:
             case "rsa":
                 try:
@@ -1178,8 +1286,12 @@ class device_interface:
         Messagebox.show_info("Success.", title="Success")
 
     @staticmethod
-    def new_dual_key_symmetric_key() -> None:
+    def new_dual_device_symmetric_key() -> None:
+        '''Set up dual-device mode.'''
 
+        # Diffie-Helman will just work as long as we have everything set up already, therefore, this fuction is mostly for verifying those conditions and telling the user to fix things.
+
+        # confirm:
         conf_dlg = ui_utils.ButtonOptionsDialog(
             prompt="Setting up new key for both configured devices. This will overwrite the slots in 9D. Are you sure?",
             items=["Yes", "No"],
@@ -1221,7 +1333,9 @@ class device_interface:
         
     @staticmethod
     def change_encryption_default() -> None:
+        '''Changes the encryption key type to one on a list'''
         
+        # that list is baked direclty into the config handler
         enc_def_dlg = QueryDialog(
             prompt=f"Select New Defalt (Current: {config.enc['key_type']})",
             title="Encryption Key Default",
@@ -1231,11 +1345,13 @@ class device_interface:
         if not enc_def_dlg.result:
             return
         
+        # update the encryption config file:
         config.update_enc({"key_type": enc_def_dlg.result})
         Messagebox.show_info("Key Type Updated.", title="Success")
 
     @staticmethod
-    def generate_device_key() -> None:
+    def generate_device_key_pair() -> None:
+        '''Generate a public/private key pair on the device. Aka, Keygen'''
 
         # look for devices: 
         try:
@@ -1246,6 +1362,7 @@ class device_interface:
         # authenticate
         man_keys = device_interface.management_authenticate()
 
+        # get user confirmation before proceeding
         conf_dlg = ui_utils.ButtonOptionsDialog(
             prompt="Configuration will overwrite slot 9d. Proceed?",
             items=["Yes", "No"],
@@ -1264,7 +1381,7 @@ class device_interface:
         if stronger_warning.result != 0:
             return
         
-        # we will need the correct management key:
+        # we will need the management key:
         this_mgmt_key = man_keys[device.name]
 
         with device.handle.open_connection(ysmart.SmartCardConnection) as connection:
@@ -1294,6 +1411,7 @@ class device_interface:
             session.generate_key(piv.SLOT.KEY_MANAGEMENT, ktype)
             new_pub_key = session.get_slot_metadata(piv.SLOT.KEY_MANAGEMENT).public_key
             
+            # X25519 is special, for no reason
             if config.enc["key_type"] == "X25519":
                 pubkey_bytes = new_pub_key.public_bytes_raw()
             else:
@@ -1309,7 +1427,7 @@ class device_interface:
 
             dummy_private_key = ec.generate_private_key(ec.SECT163R2(), None)
 
-            # generate dummy certificate:
+            # generate dummy certificate to put into the slot, signed with the dummy private key.
             from cryptography import x509
             from cryptography.x509.oid import NameOID
             subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "File Encrypter")])
@@ -1328,8 +1446,7 @@ class device_interface:
 
     @staticmethod
     def remove_device() -> None:
-        """ Remove a device from the configuration file.
-        """
+        """ Remove a device from the configuration file."""
 
         if not config.device:
             Messagebox.show_info("No configured devices found.", title="Info")
@@ -1338,6 +1455,7 @@ class device_interface:
         # auth:
         device_interface.management_authenticate()
 
+        # ui for selecting which one to get rid of
         dev_str_list = seq()
         for ele in config.device.keys():
             dev_str_list += [f"Device Name: {ele}"]
@@ -1351,6 +1469,7 @@ class device_interface:
         if dlg.result is None:
             return
         
+        # confirmation UIs
         conf_dlg = ui_utils.ButtonOptionsDialog(
             prompt=f"Confirm: Remove device '{list(config.device.keys())[dlg.result]}' from configuration?",
             items=["Yes", "No"],
@@ -1390,6 +1509,7 @@ class device_interface:
             Messagebox.show_error("No management password set up. Select 'Change Management Key' from the configuration menu.")
             return
 
+        # grab the device:
         try:
             device = device_interface.get_device(include_unconfigured=True, prompt=False)
         except ConnectionError as e:
@@ -1410,14 +1530,16 @@ class device_interface:
         if device.name != "unconfigured":
             raise ValueError("The available device is already configured.")
         
+        # test if the connected device is supported:
         with open(config.userpath / "context" / "supported_devices.json", 'r') as f:
             supported_devices = ujson.load(f)
             
         if (pid_str:=hex(device.handle.pid.value)) not in supported_devices:
             raise ValueError(f"Device is not supported. Please insert a device on the supported device list.")
                 
-        config_entry = {}
 
+        # we've validated the connected device, now get user inputs:
+        config_entry = {}
         name_dlg = QueryDialog(
             prompt="Enter a name for this device (32 or fewer characters):",
             title="Device Name"
@@ -1428,7 +1550,7 @@ class device_interface:
         if not name_input:
             return # cancel
     
-        evil_chars = '\n\t=+*\\{\\}[]^*%@#$`~;<>' #why would anyone be putting these in a name besides some sort of code injection
+        evil_chars = '\r\n\t=+*\\{\\}[]^*%@#$`~;<>' #why would anyone be putting these in a device name
         isnt_evil = lambda x: not any([ii for ii in x if ii in evil_chars])
 
         while not (name_input.isascii() and len(name_input) <= 32 and isnt_evil(name_input) and name_input.strip() != ""):
@@ -1436,6 +1558,7 @@ class device_interface:
             name_dlg.show(None, True)
             name_input = name_dlg.result
 
+        # get some device information:
         config_entry[name_input] = {}
         config_entry[name_input]["name"] = name_input
         config_entry[name_input]["model"] = supported_devices[pid_str]
@@ -1454,6 +1577,7 @@ class device_interface:
         if not raw_mgmt_key:
             return # cancel
 
+        # Get the device management key
         while True:
             try:
                 bytes.fromhex(raw_mgmt_key)
@@ -1467,6 +1591,7 @@ class device_interface:
             else:
                 break
                         
+        # connect and test management key
         with device.handle.open_connection(ysmart.SmartCardConnection) as connection:
             session = piv.PivSession(connection=connection)
             
@@ -1485,6 +1610,7 @@ class device_interface:
 
         auth = device_interface.management_authenticate()
         
+        # if it's all good, then we encrypt the management key for storage
         management_encryptor = HKDF(
             algorithm=hashes.SHA256(),
             length=24,
@@ -1504,14 +1630,14 @@ class device_interface:
         Messagebox.show_info("Device successfully set up. Run 'New Symmetric Key' to set up key", title="Success")
 
 class head_obscuration:
-
+       
     hasher = sha256()
     seed = 0x1ddfdf5b334ce54234725d0fe71bd1f0b225787fe4aa575d45b3264421d9a88
     startx = 0xb8af69d3c717c7dd927d36e4a27d669cc0657514c656d3ff574f56816e7d43c3
     start_point: ec_lite.ec_point
 
     def __init__(self):
-        # origin and start points
+        
         self.p0 = ec_lite.ec_point(self.seed, y=None)
         self.start = ec_lite.ec_point(self.startx, y=None)
     
@@ -1523,14 +1649,13 @@ class head_obscuration:
         final_coordinate = self.p0.point_multiply(int.from_bytes(bytime), self.start)
         final_bytes = final_coordinate.x.to_bytes(64, "big", signed=False)
 
-        pad_length = 255*final_bytes[12] + final_bytes[19] # take two bytes for the pad length
+        pad_length = 255*final_bytes[12] + final_bytes[19]
         pad = token_bytes(pad_length)
 
         return {"signature":bytime + final_bytes + pad, "mask":final_bytes}
     
     def read_head(self, data:bytes) -> bytes:
         
-        # first 8 bytes is timestamp:
         timestamp:int = int.from_bytes(data[:8], "big", signed=False)
 
         final_coordinate = self.p0.point_multiply(timestamp, self.start)
@@ -1539,7 +1664,7 @@ class head_obscuration:
         if final_bytes != data[8:64+8]:
             raise TypeError("File is not encrypted with this program. Cannot decrypt.")
 
-        pad_length = 255*final_bytes[12] + final_bytes[19] # take two bytes for the pad length
+        pad_length = 255*final_bytes[12] + final_bytes[19]
                
         return {"time": timestamp, "mask": final_bytes, "pad_length": pad_length}
 
@@ -1549,10 +1674,11 @@ class uiroot(ttk.Window):
         """ Main program entrypoint
         """
         super().__init__(*args, **kwargs)
-        
+
+        # ui appearance
         self.title("File Encrypter")
-        self.geometry("950x400")
-        self.minsize(950, 400)
+        self.geometry("550x400")
+        self.minsize(550, 400)
         
         row_id = 0
         # add ui elements
@@ -1603,6 +1729,7 @@ class uiroot(ttk.Window):
 
         self.updatevars()
 
+    # decorator to force backend updates after function calls
     def update_after(func):
         def wrapper(self):
             result = func(self)
@@ -1611,40 +1738,32 @@ class uiroot(ttk.Window):
         return wrapper
 
     def updatevars(self):
-
+        # function that updates the encryption lists between UI function calls.
+        # tells the user if there's something wrong, and disables encryption if there is.
+    
+        # skip the update loop if the user is in the config menu
         if hasattr(self, 'config_root') and self.busy_status():
-            # skip the update loop if the user is in the config menu
             self.config_root.lift()
             return
         
+        # set a default of not refusing to encrypt, until proven otherwise by the next parts of this function
         self.refuse_to_encrypt = False
 
-        # get the list of files to encrypt
+        # get the encryption list from the file input
         try:
             self.file_list = utils.file_entry_manager(config.userpath / "encryption_list.txt")
-        except FileNotFoundError as e:
-            ui_utils.ListMessageDialog.show_error(
-                e.full_message.before,
-                e.full_message.msglist,
-                e.full_message.after
-            )
-            return
-        except ValueError as v:
-            if hasattr(v, "full_message"):
-                ui_utils.ListMessageDialog.show_error(
-                    v.full_message.before,
-                    v.full_message.msglist,
-                    v.full_message.after
-                )
-            else:
-                Messagebox.show_error(f"{v}", title="Error")
+        
+        except Exception as e:
+            Messagebox.show_error(f"{e}", title="Error")
 
-            # set flags to not allow encrypt/decrypt in the main loop
+            # if error, we gate some options in the main menu
             self.refuse_to_encrypt = True
             self.none_are_encrypted = False
 
+        # build the actual encryption list:
         if not self.refuse_to_encrypt:
 
+            # encrypted file filter: passses to file_encrypter subroutine
             self.encrypted_files = (self.file_list.entries
                 .filter(file_encrypter.is_encrypted)
             )
@@ -1652,7 +1771,7 @@ class uiroot(ttk.Window):
             self.unencrypted_files = self.file_list.entries.filter(lambda x: x not in self.encrypted_files) # anything that's not in the enc. list
 
             if self.file_list.entries.len() == 0:
-                # everything isn't encrypted if there's nothing to begin with
+                # can't encrypt anything if there's nothing in the file list
                 self.refuse_to_encrypt = True
                 Messagebox.show_error("No files found in the file list.", title="Error")
 
@@ -1662,30 +1781,36 @@ class uiroot(ttk.Window):
         
     @update_after
     def display_filelist(self):
+        # this function just calls the FileView function
         fv = ui_utils.FileView(self, self.file_list)
+        # wait until it's closed to proceed
         fv.wait_window()
 
     @update_after
     def encrypt_all(self) -> None:
 
-        # encrypt all files on the list that are not encrypted
+        # encrypt all files on the list that are not already encrypted
         if self.refuse_to_encrypt:
+            # case: errors
             Messagebox.show_error("Cannot encrypt. Fix errors before continuing.", title="Error")
         elif self.unencrypted_files.len() == 0:
-            # nothing that's not already encrypted:
+            # case: everything on the list is already encrypted
             Messagebox.show_warning("No unencrypted files found.", title="Warning")
         else:
+            # other cases are errors that were already handled
             
-            # pass to yubikey
+            # find any yubikey devices
             devices = list_all_devices()
             
             if devices:
-                # I wrote a whole device management interface for this,
-                # but if it ain't broke, don't fix
+                # I wrote a whole device management interface for this specific purpose, which I later switched to.
+                # but if it ain't broke, don't fix.
                 serial_number = str(devices[0][0]._key[0])
 
+                # if the serial number in any of the attached devices matches a configured s/n:
                 if serial_number in seq(config.device.values()).map(lambda x: x['serial_number']):
                     
+                    # prompt user if they want to use device or password
                     dlg = ui_utils.ButtonOptionsDialog(
                         prompt="Configured Device found. Proceed with device, or switch to password?",
                         items=["Device", "Password"],
@@ -1700,12 +1825,15 @@ class uiroot(ttk.Window):
                         case 0: action = encrypt_action.encrypt_device
                         case 1: action = encrypt_action.encrypt_password
                 else:
+                    # no S/N matches -> can't use device -> default to password
                     action = encrypt_action.encrypt_password
                     Messagebox.show_warning("Found a device, but is not configured. Switching to password encryption.", title="Warning")
 
             else:
+                # no devices -> password
                 action = encrypt_action.encrypt_password
 
+            # prompt confirmation
             conf_dlg = ui_utils.ListedDialog(
                 message_beforelist="Proceed with encrypting files:",
                 list_message=self.unencrypted_files.to_list(),
@@ -1715,7 +1843,7 @@ class uiroot(ttk.Window):
             conf_dlg.show()
 
             if conf_dlg._result == "Yes":
-                e = file_encrypter(
+                file_encrypter(
                     file_source=self.unencrypted_files,
                     action=action,
                     filename_obcuration=self.obscuration_toggle.get()
@@ -1726,20 +1854,21 @@ class uiroot(ttk.Window):
     @update_after
     def decrypt_all(self) -> None:
         
-        # decrypt all
+        # decrypt all - very similar to encrypt_all
         if self.none_are_encrypted:
             Messagebox.show_info("No files are encrypted.", title="Info")
         elif self.refuse_to_encrypt:
             Messagebox.show_error("Cannot decrypt. Fix errors before continuing.", title="Error")
         else:
 
+            # it is expensive to check if files are encrypted, prepare for parallelism
             CHECK_GRAIN:int = 300
             use_pool_for_check_method = (n_pool := self.encrypted_files.len()//CHECK_GRAIN + 1) > 1
 
             # paralell-version to call get_encryption_method()
             if use_pool_for_check_method:
                 
-                _map_it = self.encrypted_files.to_list() # picklable list "map iterator"
+                _map_iterable = self.encrypted_files.to_list() # picklable list "map iterator"
                 
                 # spawn UI to display spinner animation/gif:
                 toplevel = ttk.Toplevel("Waiting...", "", (400, 300))
@@ -1769,12 +1898,12 @@ class uiroot(ttk.Window):
                 pool = Pool(max(min(n_pool, cpu_count() - 2), 2))
                 action_list = pool.map_async(
                     uiroot.check_with_key, # this just calls check encryption method
-                    _map_it, # the list from earlier
+                    _map_iterable, # the list from earlier
                     None, # don't actually specify the chunksize.
-                    callback=lambda _: stop_event.set(), # tells the toplevel mainloop to stop in the future
+                    callback=lambda _: stop_event.set(), # tells the toplevel mainloop to stop when done
                     error_callback=error_callback # error callback
                 )
-                toplevel.mainloop() # starts the toplevel mainloop
+                toplevel.mainloop() # starts the ui toplevel mainloop
 
                 # join/close all the threads
                 stop_th.join()
@@ -1788,6 +1917,7 @@ class uiroot(ttk.Window):
                 # serial version of calling check_encryption_method
                 action_list = self.encrypted_files.map(lambda x: (file_encrypter.check_encryption_method(x), x))
             
+            # groups files by what's device and password encrypted
             grouped_files = action_list.group_by_key()
 
             # run decryption
@@ -1802,10 +1932,12 @@ class uiroot(ttk.Window):
 
     @staticmethod
     def check_with_key(x:str):
+        # a pickleable function that just calls check encryption method in a key/value tuple
         return (file_encrypter.check_encryption_method(x), x)
     
     @update_after
     def new_symm_key(self) -> None:
+        # ui button call wrapper around device_interface.new_single_symmetric_key
         
         # set up a new symemtric key/exchange
         if self.encrypted_files:
@@ -1824,6 +1956,7 @@ class uiroot(ttk.Window):
             
     @update_after
     def setup_dual_key(self) -> None:
+        # ui button call wrapper around new_dual_device_symmetric_key
         
         # set up dual key exchange
         if self.encrypted_files:
@@ -1835,13 +1968,14 @@ class uiroot(ttk.Window):
             return
 
         try:
-            device_interface.new_dual_key_symmetric_key()
+            device_interface.new_dual_device_symmetric_key()
         except Exception as e:
             Messagebox.show_error(f"Setup Failed: {e}", title="Error")
             return
 
     @update_after
     def first_time_device_setup(self) -> None:
+        # ui button call for device setup
         try:
             device_interface.first_time_device_setup()
         except Exception as e:
@@ -1849,7 +1983,9 @@ class uiroot(ttk.Window):
             return
 
     @update_after
-    def generate_device_key(self) -> None:
+    def generate_device_key_pair(self) -> None:
+        # ui button call wrapper for generate device key pair
+
         # reconfig/config a device
         if self.encrypted_files:
             Messagebox.show_error(
@@ -1859,16 +1995,18 @@ class uiroot(ttk.Window):
             )
 
         try:
-            device_interface.generate_device_key()
+            device_interface.generate_device_key_pair()
         except Exception as v:
             Messagebox.show_error(f"Configuration Failed: {v}", title="Error")
 
     @update_after
     def change_asym_default(self) -> None:
+        # ui button call for setting the asymmetric encryption type menu
         device_interface.change_encryption_default()
     
     @update_after
     def new_mgmt_pass(self) -> None:
+        # ui button call for setting new management password
 
         if self.encrypted_files:
             Messagebox.show_error(
@@ -1886,6 +2024,7 @@ class uiroot(ttk.Window):
 
     @update_after
     def remove_device(self) -> None:
+        # ui button call for device removal from config
 
         if self.encrypted_files:
             Messagebox.show_error(
@@ -1901,9 +2040,12 @@ class uiroot(ttk.Window):
             Messagebox.show_error(f"Remove Failed: {v}", title="Error")
 
     def config_menu(self) -> None:
+        # ui button call for opening the config menu
 
+        # if we haven't yet spawned the config menu
         if not hasattr(self, 'config_root'):
 
+            # spawn the babadook
             self.config_root = ttk.Toplevel(self)
             self.config_root.title("Configuration Menu")
             self.config_root.geometry("400x600")
@@ -1912,6 +2054,7 @@ class uiroot(ttk.Window):
             self.config_root.columnconfigure(1, weight=1)
             self.config_root.rowconfigure(tuple(range(6)), weight=1)
 
+            # add ui elements for the config options
             row_id = 0
             mgmt_but = ttk.Button(self.config_root,
                         text="Change Management Key",
@@ -1935,8 +2078,8 @@ class uiroot(ttk.Window):
             row_id += 1
 
             cfgdev_but = ttk.Button(self.config_root,
-                        text="Generate Device Key",
-                        command=self.generate_device_key,
+                        text="Generate Device Key Pair",
+                        command=self.generate_device_key_pair,
                         bootstyle=("LIGHT", "OUTLINE"))
             cfgdev_but.grid(row=row_id, column=0, columnspan=2, pady=10, padx=10, sticky="ew")
             row_id += 1
@@ -1949,7 +2092,7 @@ class uiroot(ttk.Window):
             row_id += 1
 
             dual_but = ttk.Button(self.config_root,
-                        text="Generate Paired Device Key", 
+                        text="Generate Paired Device Keys",
                         command=self.setup_dual_key,
                         bootstyle=("LIGHT", "OUTLINE"))
             dual_but.grid(row=row_id, column=0, columnspan=2, pady=10, padx=10, sticky="ew")
@@ -1962,6 +2105,7 @@ class uiroot(ttk.Window):
             devrem_but.grid(row=row_id, column=0, columnspan=2, pady=10, padx=10, sticky="ew")
             row_id += 1
             
+            # two next to each-other for export/import respectively:
             export_button = ttk.Button(self.config_root,
                         text="Export Configuration", 
                         command=self.export_config,
@@ -1975,14 +2119,14 @@ class uiroot(ttk.Window):
             import_button.grid(row=row_id, column=1, columnspan=1, pady=10, padx=10, sticky="ew")
             row_id += 1
 
-            # print some help for the user
+            # info button for printing help
             info_but = ttk.Button(self.config_root, 
                                   text="Info", 
                                   command=self.print_config_information,
                                   bootstyle=("INFO", "OUTLINE"))
             info_but.grid(row=row_id, column=0, columnspan=1, pady=10, padx=10, sticky="ew")
 
-            # OK button to complete configuration
+            # OK button to complete the configuration
             ok_but = ttk.Button(self.config_root,
                         text="OK", 
                         command=lambda: self.config_root.withdraw() or self.busy_forget(),
@@ -1995,15 +2139,18 @@ class uiroot(ttk.Window):
             self.busy()
 
         else: 
+            # you can't get rid of the babadook, just call him back:
             self.config_root.deiconify()
             self.config_root.lift()
             self.busy()
 
     @update_after
     def export_config(self):
+        # exports the configuration files with obscuration to a ".cfgexp" file
 
         # use a random 15 byte signature for obscuration
         mask = 0x7fdeacdef4961256c6db573f535c4b
+        signature = 0xa93a3e93e6ea07c3277e
 
         with open(config.userpath / "context" / "enc_config.json", "rb") as file:
             enc_data = file.read()
@@ -2011,24 +2158,54 @@ class uiroot(ttk.Window):
         with open(config.userpath / "context" / "configured_devices.json", "rb") as file:
             devices_data = file.read()
 
+        # hopefully we don't actually need to make this check.
+        if len(enc_data) > 0xffffffff or len(devices_data) > 0xffffffff:
+            Messagebox.show_error("Configuration file is too large.", "Error")
+
         full_data_stream = int(len(enc_data)).to_bytes(4) + enc_data + int(len(devices_data)).to_bytes(4) + devices_data
         full_data_stream = file_encrypter.mask_text(full_data_stream, mask.to_bytes(15))
 
         with asksaveasfile(mode="wb", defaultextension=".cfgexp", initialfile="export") as file:
+            file.write(signature.to_bytes(10))
             file.write(full_data_stream)
 
         Messagebox.show_info("Export complete", "Info")
         
     @update_after
     def import_config(self):
+        # imports the configuration files that were exported via the format in export_config
         
         mask = 0x7fdeacdef4961256c6db573f535c4b
+        # good programmers use a file signature, right?
+        signature = 0xa93a3e93e6ea07c3277e
 
-        with askopenfile(mode="rb", defaultextension=".cfgexp", initialfile="export") as file:
+        # user selects file:
+        user_selected_file = askopenfilename(defaultextension=".cfgexp", initialfile="export")
+
+        # verify file extension
+        user_selected_file = pathlib.Path(user_selected_file)
+        if not user_selected_file.suffix == ".cfgexp":
+            Messagebox.show_error("Expected a .cfgexp file extension.", "Error")
+            return
+        
+        # read:
+        with user_selected_file.open('rb') as file:
+
+            # read first 10 bytes signature:
+            import_signature = file.read(10)
+
+            # check signature
+            if int.from_bytes(import_signature) != signature:
+                Messagebox.show_error("Incorrect file format for import.", "Error")
+                return
+
+            # read the rest of the data
             import_data = file.read()
 
+        # decode the rest of the file:
         import_data = file_encrypter.mask_text(import_data, mask.to_bytes(15))
-
+        
+        # parse lengths and the bytes that follow:
         try:
             enc_data_len = int.from_bytes(import_data[:4])
             enc_data = import_data[4:(pos:=4+enc_data_len)]
@@ -2038,10 +2215,12 @@ class uiroot(ttk.Window):
             Messagebox.show_error("Incorrect file format for import.", "Error")
             return
 
+        # final check: if predicted end of file isn't actual end of file:
         if pos+4+dev_data_len != len(import_data):
             Messagebox.show_error("Incorrect file format for import.", "Error")
             return
         
+        # json decode:
         try:
             enc_dict = ujson.loads(enc_data)
             dev_dict = ujson.loads(dev_data)
@@ -2049,6 +2228,7 @@ class uiroot(ttk.Window):
             Messagebox.show_error("Incorrect file format for import.", "Error")
             return
 
+        # get user confirmation
         conf_dlg = ui_utils.ButtonOptionsDialog(
                 prompt="Continue with importing file configurations? This will overwrite existing symmetric keys",
                 items=["Yes", "No"],
@@ -2059,6 +2239,7 @@ class uiroot(ttk.Window):
         if conf_dlg.result != 0:
             return
 
+        # update the configuration files:
         with open(config.userpath / "context" / "enc_config.json", "w") as file:
             ujson.dump(enc_dict, file, indent=4)
 
@@ -2067,17 +2248,20 @@ class uiroot(ttk.Window):
             ujson.dump(dev_dict, file, indent=4)
 
         config.__init__()
+
+        Messagebox.show_info("Successfully Imported Config File.", "Success")
             
     @staticmethod
     def print_config_information():
+        '''Prints help to a messagebox for the user'''
         info_dlg = ui_utils.ListedDialog(
             message_beforelist="Configuration Menu Information:",
             list_message=["1. Change Management Key - set up or change the device management key. Run this first, before setting up any devices.", "",
                             "2. First Time Device Setup - configures a device for the first time, sets up the management authority to add keys to the device slots",  "",
                             "3. Change Key Type - select the type of asymmetric device key you would like to use. If you don't know what these options are, a quick online search can tell you all you need to know", "",
-                            "4. Generate Device Key - creates a new private/public key pair on the device slot 9D. Overwrites any existing keys that are there. You must have configured the device, and have the management key handy", "",
+                            "4. Generate Device Key Pair - creates a new private/public key pair on the device slot 9D. Overwrites any existing keys that are there. You must have configured the device, and have the management key handy", "",
                             "5. New Symmetric Key - creates a new encrypted symmetric key locally, which only the device's asymmetric key can unlock. Device-based encryption is always performed with this symmetric key.", "",
-                            "6. Generate Paired Device Key - if you have two configured devices, this sets up a Diffie-Hellman exchange where both devices can decrypt the symmetric key and perform device-based encryption. Requires two configured devices, and you must run Generate Device Key on both, with the key type set to an EC Key.", "",
+                            "6. Generate Paired Device Keys - if you have two configured devices, this sets up a Diffie-Hellman exchange where both devices can decrypt the symmetric key and perform device-based encryption. Requires two configured devices, and you must run Generate Device Key on both, with the key type set to an EC Key.", "",
                             "7. Remove Device - removes a device from the configured devices list"
                             ],
             message_afterlist="Press OK to continue",
@@ -2086,11 +2270,17 @@ class uiroot(ttk.Window):
         info_dlg.show()
 
 def single_target_mode(target_path:pathlib.Path) -> None:
+    '''Single target mode encrypts/decrypts whatever is at a single path. If it's a dir, it zips that dir and encrypts it as a file. 
+    If it's a file, it encrypts/decrypts that file and opens it in the OS's base program associated with that file.
+    
+    :param pathlib.Path target_path:
+    '''
 
-    # check to see if the file exists
+    # check to see if the target exists:
     if not target_path.exists():
         raise ValueError(f"The input: '{target_path}' does not exist.")
     
+    # open a mini ui that just displays 'processing' label
     root=ttk.Window(
             title="File Encryptor", 
             themename="superhero")
@@ -2099,17 +2289,18 @@ def single_target_mode(target_path:pathlib.Path) -> None:
     root.iconphoto(False, ttk.PhotoImage(file= config.installroot / "resources" / "icons8-data-matrix-code-96.png"))
     ttk.Label(master=root, text="Processing...").pack()
 
-    # check if the file is already encrypted
+    # check if the file is already encrypted. dirs cannot be encrypted, so skip those for now.
     if target_path.is_file() and file_encrypter.is_encrypted(target_path):
         
         action = file_encrypter.check_encryption_method(target_path)
 
-        # simple decrypt:
+        # decrypt
         e = file_encrypter(
                 file_source=seq((target_path,)),
                 action=action
             )
         
+        # open the file
         startfile(e.returned_files[0])
             
     else: # encrypt
@@ -2126,9 +2317,11 @@ def single_target_mode(target_path:pathlib.Path) -> None:
         if devices and len(config.device) > 0:
 
             serial_number = str(devices[0][0]._key[0])
+            
             # the one instance of list comprehension in this entire project
             if any([serial_number == v['serial_number'] for v in config.device.values()]):
 
+                # if the device is configured, prompt user to see if they want to use device encryption or password
                 dlg = ui_utils.ButtonOptionsDialog(
                     prompt="Configured Device found. Proceed with device, or switch to password?",
                     items=["Device", "Password"],
@@ -2142,10 +2335,17 @@ def single_target_mode(target_path:pathlib.Path) -> None:
                 match dlg.result:
                     case 0: action = encrypt_action.encrypt_device
                     case 1: action = encrypt_action.encrypt_password
+            
+            else:
+                # devices found, but weren't configured.
+                Messagebox.show_warning("A device was found, but is not configured. Switching to password encryption", "Warning")
+                action = encrypt_action.encrypt_password
 
         else:
+            # no devices 
             action = encrypt_action.encrypt_password
 
+        # get confirmation to proceed
         conf_dlg = ui_utils.ButtonOptionsDialog(
             prompt = f"Proceed with encrypting: {target_path}? Cannot be undone (y/n)",
             items = ["Yes", "No"],
@@ -2159,9 +2359,14 @@ def single_target_mode(target_path:pathlib.Path) -> None:
             if target_path.is_dir():
 
                 # make zip:
-                with ZipFile((zip_target:=target_path.with_suffix(".zip")), "w") as zipped:
-                    for file in target_path.rglob("*"):
-                        zipped.write(file, file.relative_to(target_path))
+                try:
+                    with ZipFile((zip_target:=target_path.with_suffix(".zip")), "w") as zipped:
+                        for file in target_path.rglob("*"):
+                            zipped.write(file, file.relative_to(target_path))
+                except Exception as e:
+                    # if can't zip the folder properly, exit now so that we don't destroy stuff that shouldn't be destroyed
+                    Messagebox.show_error(f"Error zipping directory {e}")
+                    return                
                                         
                 # remove original copies of files:
                 for file_or_folder in tuple(target_path.rglob("*")):
@@ -2174,6 +2379,7 @@ def single_target_mode(target_path:pathlib.Path) -> None:
                 # set target to the zipped file
                 target_path = zip_target
 
+            # finally, encrypt the target, which is now either a zipped dir, or just a normal file.
             try:
                 e = file_encrypter(
                     file_source=seq((target_path,)),
@@ -2185,6 +2391,7 @@ def single_target_mode(target_path:pathlib.Path) -> None:
             
 if __name__ == "__main__":
 
+    # argument parser
     parser = ArgumentParser("File Encrypter interface")
     parser.add_argument("-m", "--mode", choices=('normal', 'target'), default='normal', type=str, required=False)
     parser.add_argument("-t", "--target", type=str, required=False, action="append")
@@ -2193,6 +2400,7 @@ if __name__ == "__main__":
     
     match args.mode:
         case "normal":
+            # i.e. '-mnormal' - starts the main UI up
 
             rt = uiroot(title="File Encrypter", 
                         themename="superhero"
@@ -2204,10 +2412,12 @@ if __name__ == "__main__":
             rt.mainloop()
 
         case "target":
+            # i.e. -mtarget -t<target>
             if not args.target:
-                raise ValueError("Target mode requires a dath argument")
-            elif "".join(args.target).find("file_encryptor.py") != -1:
-                raise ValueError("Cannot encrypt the encryption program.")
+                raise ValueError("Target mode requires a path argument")
+            elif any([forbidden_pat in "".join(args.target) for forbidden_pat in ("file_encrypter.py", "configured_devices.json", "enc_config.json", "supported_devices.json")]):
+                raise ValueError("Cannot encrypt configuration files.")
             else:
+                # if we passed all the checks, run single target mode
                 single_target_mode(pathlib.Path(args.target[0].strip("'")))
                 

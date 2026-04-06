@@ -3,8 +3,11 @@ from functional import seq
 from collections.abc import Iterable
 
 class dict_fromhex(dict):
+# dict overload that returns bytes directly from hex string values
+
     def __getitem__(self, key):
 
+        # type exceptions to skip the hex conversion:
         allowed_types = {"str": str, "int": int, "float": float, "bool": lambda x: x}
 
         raw_return = super().__getitem__(key)
@@ -17,6 +20,7 @@ class dict_fromhex(dict):
             return bytes.fromhex(super().__getitem__(key))
 
 class file_entry_manager:
+# class to manage what's in the encryption list
 
     base_entries:list[pathlib.Path]
     file_path:pathlib.Path
@@ -28,7 +32,7 @@ class file_entry_manager:
             file_path  = pathlib.Path(file_path)
 
         if not file_path.is_file():
-            file_path.touch() #now it exists!
+            file_path.touch() #now it exists, too!
 
         self.file_path = file_path
 
@@ -39,6 +43,7 @@ class file_entry_manager:
         self.get_subentries()
         
     def get_subentries(self):
+    # expands folders into lists of files
 
         self.entries = self.base_entries.map(pathlib.Path.absolute)
 
@@ -71,6 +76,7 @@ class file_entry_manager:
         self.entries = dir_entries
 
     def add_item(self, new_items:Iterable[pathlib.Path] | pathlib.Path) -> None:
+    # adds an item to the text file in a newline
 
         if isinstance(new_items, Iterable) and len(new_items[0])!=1:
             for ele in new_items:
@@ -85,6 +91,7 @@ class file_entry_manager:
         self.get_subentries()
 
     def remove_item(self, items_to_remove:Iterable[pathlib.Path] | pathlib.Path) -> None:
+    # remover
 
         if isinstance(items_to_remove, Iterable) and len(items_to_remove[0])!=1:
             for ele in items_to_remove:
@@ -98,6 +105,7 @@ class file_entry_manager:
         self.get_subentries()
 
     def save_file(self):
+    # write the file out to save
 
         with self.file_path.open("w") as file:
             seq(self.base_entries).map(lambda x: str(x)+"\n").for_each(file.write)

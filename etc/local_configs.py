@@ -5,28 +5,36 @@ from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives import serialization
 import yubikit.piv as piv
 
+# this file handles configuration options, mostly organizing a bunch of dicts.
+
+# "bootstrapping":
 etc_config = yaml.load((pathlib.Path(__file__).parent / "config.yml").open("r"), Loader=yaml.Loader)
 installroot = pathlib.Path(etc_config['root'])
 userpath = pathlib.Path(etc_config['user_path'])
 
 class config_loader:
+    '''Configuration Handler. Loads by itself based on relative file paths to expected .json files.'''
     
     def __init__(self):
 
+        # load the encryption config file:
         try:
             self.enc = dict_fromhex(ujson.load(open(userpath / "context" / "enc_config.json", "r")))
         except FileNotFoundError as e:
             raise FileNotFoundError("Encryption settings configuration file not found. Check installation.")
         
+        # load the configured devices config file:
         try:
             self.device = ujson.load(open(userpath / "context" / "configured_devices.json", "r"))
         except FileNotFoundError as e:
             raise FileNotFoundError("Supported devices configuration file not found. Check installation.")
 
-        self.get_tempdir()
+        # self.get_tempdir() # makes a folder in AppData/Temp - currently unused
+
         self.installroot = installroot
         self.userpath = userpath
 
+        # some dicts - kept as dicts in the code and not config files due to some python typing
         self.keytype_piv = {
                 "RSA2048": piv.KEY_TYPE.RSA2048,
                 "RSA3072": piv.KEY_TYPE.RSA3072,
@@ -42,6 +50,11 @@ class config_loader:
         }
 
     def update_enc(self, new_dict:dict):
+        '''udpates the encryption config file.
+
+            :param dict new_dict: a dict, assumed to be an additional property or change - not an entirely new dict.
+        
+        '''
         
         if not isinstance(new_dict, dict):
             raise TypeError("The new configuration must be a dictionary.")
@@ -52,6 +65,7 @@ class config_loader:
         
         self.enc.update(new_dict)
         
+        # cross-reference the old config file - the keys should not change
         with open(userpath / "context" / "enc_config.json", 'r') as current_config:
             current_dict = ujson.load(current_config)
 
@@ -65,6 +79,11 @@ class config_loader:
         self.__init__()
 
     def update_device_parameter(self, new_dict:dict):
+        '''Updates a level-2 nested object's parameter in the device configuration file
+
+        :param dict new_dict: A scalar dict with a sub-dict for each updated parameter
+        '''
+
         if not isinstance(new_dict, dict):
             raise TypeError("The new configuration must be a dictionary.")
         
@@ -89,17 +108,26 @@ class config_loader:
         self.__init__()
 
     def update_device(self, new_dict:dict):
+        '''udpates the device config file.
+
+            :param dict new_dict: a dict, assumed to be an additional property or change - not an entirely new dict.
+        
+        '''
 
         if not isinstance(new_dict, dict):
             raise TypeError("The new configuration must be a dictionary.")
 
         self.device.update(new_dict)
-        required_keys = {"name", "model", "description", "serial_number", "firmware_version", "management_key", "public_key", "key_type"}
 
+        # this time the keys are set in stone and defined here:
+        required_keys = {"name", "model", "description", "seriasl_number", "firmware_version", "management_key", "public_key", "key_type"}
+
+        # validate that they match up
         for key, value in new_dict.items():
             if set(value.keys()) != required_keys:
                 raise KeyError(f"The new configuration for device '{key}' does not match the template keys.")
 
+        # write output
         with open(userpath / "context" / "configured_devices.json", 'w') as config_file:
             ujson.dump(self.device, config_file, indent=4)
 
@@ -107,13 +135,16 @@ class config_loader:
 
     @property
     def rsa_or_ec(self):
+        '''Returns "rsa" if the key type is rsa, and "ec" if the key type is "ec".'''
         ktype = self.enc["key_type"]
         if "RSA" in ktype:
             return "rsa"
         else:
+            # completely ignoring any emergent type of asymmetric cryptograph
             return "ec"
 
     def get_tempdir(self):
+        '''Generates a dir in C:\\Users\\user\\AppData\\Temp. Not Used'''
 
         tempdir = pathlib.Path(getenv("TEMP"))
         tempdir = tempdir / "file_encryptor"
@@ -122,7 +153,6 @@ class config_loader:
             tempdir.mkdir()
 
         self.temp_dir = tempdir
-
 
 def main():
     pass
