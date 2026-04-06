@@ -1,11 +1,12 @@
 import platform, json, yaml, pathlib, venv, subprocess, pyshortcuts, os, shutil
 from secrets import token_bytes
-
-# from pyuac import main_requires_admin
 from zipfile import ZipFile
-from functional import seq
 
-def has_admin_windows():
+# installs the program!
+
+def has_admin_windows() -> bool:
+    '''Tells if the current instance of python has elevated privilege.'''
+
     try:
         temp = os.listdir(os.sep.join([os.environ.get('SystemRoot','C:\\windows'),'temp']))
     except:
@@ -14,9 +15,9 @@ def has_admin_windows():
         return True
 
 def install_windows():
+    '''Procedural Windows program installation'''
 
     if not has_admin_windows():
-        print("Admin privilege is needed for install. Rerun as admin.")
         input("Press enter to continue")
         return
 
@@ -30,14 +31,14 @@ def install_windows():
     installroot = prog_files_dir / "file_encrypter"
     if not installroot.is_dir():
         installroot.mkdir()
-    else:
-        # remove prior installation, besides config files:
+    else: # the install dir was already there
+        # remove prior installation
         for item in installroot.rglob("*"):
-            if item.is_file() and item.name not in ("configured_devices.json", "enc_config.json", "encryption_list.txt"):
+            if item.is_file():
                 item.unlink()
-        
+
         for item in installroot.glob("*"):
-            if item.is_dir() and item.name not in ("context"):
+            if item.is_dir():
                 shutil.rmtree(item)
 
     # make local user accessible path in AppData
@@ -45,11 +46,12 @@ def install_windows():
     if not userpath.exists():
         userpath.mkdir()
         
-    # verify installation package, and unzip
+    # 'verify' installation package
     print("Verifying installation package...")
     this_folder = pathlib.Path(__file__).parent
     assert (package:=(this_folder / "package.zip")).is_file
 
+    # unzip/copy/paste the base files
     print("Copying files...")
     try:
         with ZipFile(package, "r") as z:
@@ -77,7 +79,7 @@ def install_windows():
         return
         
     try:
-    # verify
+        # verify that the right dirs are there:
         for subfolder in ("context", "etc", "file_encrypter_utils", "resources"):
             assert((installroot / subfolder).is_dir())
 
@@ -102,20 +104,20 @@ def install_windows():
     with config_devices_file.open('r') as ff:
         temp_data = ff.read()
 
+    # if the device config file is empty, write a default empty object (so that ujson has something to decode):
     if len(temp_data) == 0:
         with config_devices_file.open('w') as ff:
-            # write a default empty object in configured devices file:
             ff.write("{}")
 
-    # two empty files:
+    # init two files
     (installroot / "etc" / "config.yml").touch()
     (userpath / "encryption_list.txt").touch()
 
-    # correct the naming for the encryption config file
+    # setup for the enc config file, copying the _san.json to the actual file
     enc_config_file = userpath / "context" / "enc_config.json"
     san_enc_config = installroot / "context" / "enc_config_san.json"
 
-    # only replace if it doesn't exist:
+    # only replace enc_config.json it doesn't exist:
     if not enc_config_file.exists():
 
         shutil.move(san_enc_config, enc_config_file)
@@ -128,23 +130,24 @@ def install_windows():
             file.write(json.dumps(enc_config_data))
 
     else:
-        # if it exists, we don't need the copy.
+        # if it exists, we don't need the _san copy.
         san_enc_config.unlink()
 
-    # move the context files to the user's path, now that it's all set up:
+    # move the supported device file to the user path:
     shutil.move(installroot / "context" / "supported_devices.json", userpath / "context" / "supported_devices.json")
+
+    # clean up our own droppings
     (installroot / "context").rmdir()
     
     # set up the /etc/yaml variables, which will be referenced by the program later
     etc_vars = {"root":str(installroot), "user_path":str(userpath)}
-    
     with (installroot / "etc" / "config.yml").open('w') as config_stream:
             yaml.dump(etc_vars, config_stream, Dumper=yaml.Dumper)
 
     reg_keys = {}
     shortcut_paths = {}
     
-    # make shortcut:
+    # make shortcut(s):
     py_exe_path = installroot / ".venv" / "Scripts" / "pythonw.exe"
     path_to_script = installroot / "file_encrypter.py"
     desktop_path = pathlib.Path("C:\\") / "Users" / os.getenv("USERNAME") / "Desktop"
@@ -183,6 +186,7 @@ def install_windows():
         print(f"Could not generate shortcut: {e}")
         
     finally:
+        # collect/dump the config info:
         shortcut_paths['desktop_shortcut'] = desktop_shortcut_file_name
         shortcut_paths['startmenu_shortcut'] = start_menu_shortcut_file_name
 
@@ -192,6 +196,7 @@ def install_windows():
 
     # registry keys:
     try:
+        # this is the command to run file-encrypter in any of the context menus:
         command_string = f"\"{py_exe_path}\" \"{path_to_script}\" -mtarget -t\"%1\""
         
         target_file_ext = json.load((userpath / "context" / "enc_config.json").open("r"))["file_extension"]["value"]
@@ -246,11 +251,12 @@ def install_windows():
 
     except Exception as e:
         print(f"Error generating file extension associations and/or context menu shortcuts: {e}. Rolling back:")
-        for k, v in reg_keys:
+        for v in reg_keys.values():
             winreg.DeleteKey(*v)
         return 
         
     finally:
+        # collect/dump install info:
         etc_vars["reg_keys"] = reg_keys
         with (installroot / "etc" / "config.yml").open('w') as config_stream:
             yaml.dump(etc_vars, config_stream, Dumper=yaml.Dumper)
@@ -258,6 +264,7 @@ def install_windows():
     print("Complete. You may close this terminal.")
 
 def main():
+    # OS gateway:
     match platform.uname().system:
         case "Windows":
             install_windows()
@@ -267,6 +274,6 @@ def main():
 if __name__ == "__main__":
     if (pathlib.Path(__file__).parent / ".git").exists():
         # don't ever ever install to the git repo location. That'd be bad.
-        print("Cannot run uninstall script inside of repo.")
+        print("Cannot run install script inside of repo.")
     else:
         main()
