@@ -1876,7 +1876,7 @@ class uiroot(ttk.Window):
                         file_path = pathlib.Path(__file__).parent / "resources" / "dual_ring_spinner.gif",
                         text_input= "Building Encrypted File List..."
                         )
-                gif.pack(fill="both", expand=ttk.YES)
+                gif.pack(fill="both", expand=True)
                 
                 # function that will close the ttk.Toplevel and exit its mainloop:
                 def await_fcn(evt:threading.Event, this_toplevel:ttk.Toplevel, this_gif:ui_utils.AnimatedGif):
